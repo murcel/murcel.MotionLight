@@ -332,13 +332,15 @@ class RoomMotionLights extends IPSModule
 
     /* ================= Debug-Actions (Buttons im Formular) ================= */
     public function DebugStoreScene(): void
-    {
-        $this->writeAttr('SceneRestore', $this->captureCurrentScene());
-    }
-    public function DebugClearScene(): void
-    {
-        $this->writeAttr('SceneRestore', []);
-    }
+public function DebugStoreScene(int $InstanceID): void
+{
+    $this->writeAttr('SceneRestore', $this->captureCurrentScene());
+}
+
+public function DebugClearScene(int $InstanceID): void
+{
+    $this->writeAttr('SceneRestore', []);
+}
 
     /* ================= Settings lesen ================= */
     private function getSettingTimeoutSec(): int
@@ -580,13 +582,4 @@ class RoomMotionLights extends IPSModule
         $this->WriteAttributeString('RegisteredIDs', json_encode($ids));
     }
 
-    /* ================= Debug-Wrapper (Buttons) ================= */
-    public function DebugStoreScene($InstanceID)
-    {
-        $this->DebugStoreScene();
-    }
-    public function DebugClearScene($InstanceID)
-    {
-        $this->DebugClearScene();
-    }
 }
