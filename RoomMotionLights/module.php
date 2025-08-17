@@ -1,49 +1,50 @@
 <?php
+declare(strict_types=1);
+
 class RoomMotionLights extends IPSModule
 {
     public function Create()
     {
         parent::Create();
 
-        // Bewegungsmelder
+        // --- Properties (Konfiguration) ---
         $this->RegisterPropertyInteger('MotionVariable', 0);
-
-        // Lichter (Liste)
-        $this->RegisterPropertyString('Lights', '[]');
-
-        // Globale und Raum-Status Variablen
-        $this->RegisterPropertyString('GlobalInhibit', '[]');
-        $this->RegisterPropertyString('RoomInhibit', '[]');
-
-        // Grundkonfig
+        $this->RegisterPropertyString('Lights', '[]');          // [{VarType:'Dimmer|Switch', VarID:int}]
+        $this->RegisterPropertyString('GlobalInhibit', '[]');   // [int] oder [{var:int}]
+        $this->RegisterPropertyString('RoomInhibit', '[]');     // [int] oder [{var:int}]
+        $this->RegisterPropertyInteger('LuxVar', 0);            // optional: Lux-Quelle
         $this->RegisterPropertyInteger('TimeoutSec', 300);
         $this->RegisterPropertyInteger('DefaultDim', 60);
         $this->RegisterPropertyInteger('LuxMax', 0);
-
-        // Flags
         $this->RegisterPropertyBoolean('ManualAutoOff', false);
 
-        // Statusvariablen
+        // --- Instanz-Variablen (runtime stellbar / View) ---
         $this->RegisterVariableBoolean('Override', 'Automatik deaktivieren', '~Switch', 1);
         $this->EnableAction('Override');
 
         $this->RegisterVariableInteger('Set_TimeoutSec', 'Timeout (s)', '', 2);
         $this->EnableAction('Set_TimeoutSec');
-        $this->SetValue('Set_TimeoutSec', 300);
+        if ($this->GetValue('Set_TimeoutSec') === 0) {
+            $this->SetValue('Set_TimeoutSec', 300);
+        }
 
-        $this->RegisterVariableInteger('Set_DefaultDim', 'Standard-Dimmwert (%)', '', 3);
+        $this->RegisterVariableInteger('Set_DefaultDim', 'Standard-Dimmwert (%)', '~Intensity.100', 3);
         $this->EnableAction('Set_DefaultDim');
-        $this->SetValue('Set_DefaultDim', 60);
+        if ($this->GetValue('Set_DefaultDim') === 0) {
+            $this->SetValue('Set_DefaultDim', 60);
+        }
 
         $this->RegisterVariableInteger('Set_LuxMax', 'Maximaler Lux-Wert', '', 4);
         $this->EnableAction('Set_LuxMax');
-        $this->SetValue('Set_LuxMax', 0);
+        if ($this->GetValue('Set_LuxMax') === 0) {
+            $this->SetValue('Set_LuxMax', (int)$this->ReadPropertyInteger('LuxMax'));
+        }
 
         $this->RegisterVariableBoolean('Set_ManualAutoOff', 'Manuelles Auto-Off aktiv', '~Switch', 5);
         $this->EnableAction('Set_ManualAutoOff');
-        $this->SetValue('Set_ManualAutoOff', false);
+        $this->SetValue('Set_ManualAutoOff', (bool)$this->ReadPropertyBoolean('ManualAutoOff'));
 
-        // Szene-Attribute
+        // Szene-Backup
         $this->RegisterAttributeString('SceneRestore', json_encode([]));
 
         // Timer
@@ -54,18 +55,130 @@ class RoomMotionLights extends IPSModule
     {
         parent::ApplyChanges();
 
-        $motion = $this->ReadPropertyInteger('MotionVariable');
-        if ($motion > 0 && @IPS_VariableExists($motion)) {
-            $this->RegisterMessage($motion, VM_UPDATE);
+        // alte Registrierungen zurücksetzen
+        @$this->UnregisterMessage($this->ReadPropertyInteger('MotionVariable'), VM_UPDATE);
+
+        // Motion registrieren
+        $mv = $this->ReadPropertyInteger('MotionVariable');
+        if ($mv > 0 && @IPS_VariableExists($mv)) {
+            $this->RegisterMessage($mv, VM_UPDATE);
         }
+
+        // Inhibits registrieren (optional)
+        foreach ($this->getIDList('GlobalInhibit') as $vid) {
+            $this->RegisterMessage($vid, VM_UPDATE);
+        }
+        foreach ($this->getIDList('RoomInhibit') as $vid) {
+            $this->RegisterMessage($vid, VM_UPDATE);
+        }
+
+        // Lichter registrieren (für "manuelles Auto-Off")
+        foreach ($this->getLights() as $light) {
+            $id = (int)($light['VarID'] ?? 0);
+            if ($id > 0 && @IPS_VariableExists($id)) {
+                $this->RegisterMessage($id, VM_UPDATE);
+            }
+        }
+    }
+
+    public function GetConfigurationForm(): string
+    {
+        return json_encode([
+            'elements' => [
+                // Bewegungsmelder
+                ['type' => 'ExpansionPanel', 'caption' => 'Bewegungsmelder', 'items' => [
+                    ['type' => 'SelectVariable', 'name' => 'MotionVariable', 'caption' => 'Bewegungs-Variable (Bool)']
+                ]],
+                // Lichter
+                ['type' => 'ExpansionPanel', 'caption' => 'Lichter', 'items' => [
+                    [
+                        'type' => 'List', 'name' => 'Lights', 'caption' => 'Akteure',
+                        'columns' => [
+                            [
+                                'caption' => 'Typ', 'name' => 'VarType', 'width' => '140px', 'add' => 'Dimmer',
+                                'edit' => [
+                                    'type' => 'Select',
+                                    'options' => [
+                                        ['caption' => 'Dimmer',  'value' => 'Dimmer'],
+                                        ['caption' => 'Schalter','value' => 'Switch']
+                                    ]
+                                ]
+                            ],
+                            [
+                                'caption' => 'Variable', 'name' => 'VarID', 'width' => '320px', 'add' => 0,
+                                'edit' => ['type' => 'SelectVariable']
+                            ]
+                        ],
+                        'add' => true, 'delete' => true
+                    ]
+                ]],
+                // Stati / Inhibits
+                ['type' => 'ExpansionPanel', 'caption' => 'Stati (Inhibits)', 'items' => [
+                    [
+                        'type' => 'List', 'name' => 'RoomInhibit', 'caption' => 'Raum-Stati (Bool TRUE blockiert)',
+                        'columns' => [[
+                            'caption' => 'Variable', 'name' => 'var', 'width' => '320px',
+                            'add' => 0, 'edit' => ['type' => 'SelectVariable']
+                        ]],
+                        'add' => true, 'delete' => true
+                    ],
+                    [
+                        'type' => 'List', 'name' => 'GlobalInhibit', 'caption' => 'Globale Stati (Bool TRUE blockiert)',
+                        'columns' => [[
+                            'caption' => 'Variable', 'name' => 'var', 'width' => '320px',
+                            'add' => 0, 'edit' => ['type' => 'SelectVariable']
+                        ]],
+                        'add' => true, 'delete' => true
+                    ]
+                ]],
+                // Lux
+                ['type' => 'ExpansionPanel', 'caption' => 'Lux (optional)', 'items' => [
+                    ['type' => 'SelectVariable', 'name' => 'LuxVar', 'caption' => 'Lux-Variable (Float/Integer)'],
+                    ['type' => 'Label', 'caption' => 'Den Schwellwert "Maximaler Lux-Wert" stellst du in der Instanzvariable Set_LuxMax ein.']
+                ]],
+                // Verhalten (Hinweis: zur Laufzeit per Instanzvariablen)
+                ['type' => 'ExpansionPanel', 'caption' => 'Verhalten (Hinweis)', 'items' => [
+                    ['type' => 'Label', 'caption' => 'Timeout (s), Standard-Dimmwert (%) und Max-Lux sind als Instanzvariablen direkt änderbar.']
+                ]]
+            ],
+            'actions' => [
+                ['type' => 'Label', 'caption' => '--- Debug ---'],
+                ['type' => 'Button', 'caption' => 'Szene sichern (Live → Restore)', 'onClick' => 'RML_DebugStoreScene($id);'],
+                ['type' => 'Button', 'caption' => 'Szene wiederherstellen',        'onClick' => 'RML_DebugRestoreScene($id);'],
+                ['type' => 'Button', 'caption' => 'Szene löschen',                  'onClick' => 'RML_DebugClearScene($id);'],
+                ['type' => 'Button', 'caption' => 'Auto-Off jetzt ausführen',      'onClick' => 'RML_AutoOff($id);']
+            ],
+            'status' => []
+        ]);
     }
 
     public function MessageSink($TimeStamp, $SenderID, $Message, $Data)
     {
-        if ($Message === VM_UPDATE && $SenderID == $this->ReadPropertyInteger('MotionVariable')) {
-            $val = GetValueBoolean($SenderID);
-            if ($val) {
-                $this->handleMotionDetected();
+        if ($Message !== VM_UPDATE) return;
+
+        // Bewegung?
+        if ($SenderID === $this->ReadPropertyInteger('MotionVariable')) {
+            if (!@GetValueBoolean($SenderID)) return; // nur auf TRUE
+            $this->handleMotionDetected();
+            return;
+        }
+
+        // Manuelles Auto-Off: wenn irgendein Licht > 0 / true wird, Timer armen
+        if ($this->GetValue('Set_ManualAutoOff')) {
+            foreach ($this->getLights() as $l) {
+                $id  = (int)($l['VarID'] ?? 0);
+                if ($SenderID === $id) {
+                    if (($l['VarType'] ?? '') === 'Switch') {
+                        if (@GetValueBoolean($id)) $this->armAutoOffTimer();
+                    } else { // Dimmer
+                        $val = @GetValue($id);
+                        if (is_numeric($val)) {
+                            $on = $this->isNonZero($id, (float)$val);
+                            if ($on) $this->armAutoOffTimer();
+                        }
+                    }
+                    break;
+                }
             }
         }
     }
@@ -100,23 +213,26 @@ class RoomMotionLights extends IPSModule
         }
     }
 
-    private function handleMotionDetected()
+    /* ===== Kernlogik ===== */
+
+    private function handleMotionDetected(): void
     {
         // Stati prüfen
-        if ($this->GetValue('Override')) {
-            $this->SendDebug('Motion', 'Überschrieben, keine Aktion', 0);
-            return;
-        }
-        foreach (json_decode($this->ReadPropertyString('GlobalInhibit')) as $var) {
-            if ($var > 0 && GetValueBoolean($var)) return;
-        }
-        foreach (json_decode($this->ReadPropertyString('RoomInhibit')) as $var) {
-            if ($var > 0 && GetValueBoolean($var)) return;
+        if ($this->GetValue('Override')) return;
+        foreach ($this->getIDList('GlobalInhibit') as $vid) { if (@GetValueBoolean($vid)) return; }
+        foreach ($this->getIDList('RoomInhibit')   as $vid) { if (@GetValueBoolean($vid)) return; }
+
+        // Lux-Grenze (optional)
+        $luxVar = $this->ReadPropertyInteger('LuxVar');
+        if ($luxVar > 0 && @IPS_VariableExists($luxVar)) {
+            $lux = @GetValue($luxVar);
+            $max = (int)$this->GetValue('Set_LuxMax');
+            if (is_numeric($lux) && $max > 0 && (float)$lux > $max) return;
         }
 
-        // Szene wiederherstellen oder Default setzen
+        // Szene vorhanden? -> wiederherstellen, sonst Default schalten
         $scene = json_decode($this->ReadAttributeString('SceneRestore'), true);
-        if (!empty($scene)) {
+        if (is_array($scene) && !empty($scene)) {
             $this->restoreScene($scene);
         } else {
             $this->switchLightsOn();
@@ -125,114 +241,141 @@ class RoomMotionLights extends IPSModule
         $this->armAutoOffTimer();
     }
 
-    private function switchLightsOn()
+    private function switchLightsOn(): void
     {
-        $lights = json_decode($this->ReadPropertyString('Lights'), true);
-        $dim = $this->GetValue('Set_DefaultDim');
+        $lights = $this->getLights();
+        $dimPct = (int)$this->GetValue('Set_DefaultDim');
 
         foreach ($lights as $light) {
-            if ($light['VarType'] === 'Dimmer') {
-                $varID = $light['VarID'];
-                if (@IPS_VariableExists($varID)) {
-                    $profile = IPS_GetVariable($varID)['VariableProfile'];
-                    $max = $profile ? IPS_GetVariableProfile($profile)['MaxValue'] : 100;
-                    $val = (int)round($dim / 100 * $max);
-                    RequestAction($varID, $val);
-                }
-            } elseif ($light['VarType'] === 'Switch') {
-                $varID = $light['VarID'];
-                if (@IPS_VariableExists($varID)) {
-                    RequestAction($varID, true);
-                }
+            $id = (int)($light['VarID'] ?? 0);
+            if (!$id || !@IPS_VariableExists($id)) continue;
+
+            $type = $light['VarType'] ?? 'Dimmer';
+            if ($type === 'Switch') {
+                @RequestAction($id, true);
+            } else { // Dimmer
+                $target = $this->pctToRaw($id, $dimPct);
+                @RequestAction($id, $target);
             }
         }
     }
 
-    private function armAutoOffTimer()
+    public function AutoOff(): void
     {
-        $sec = $this->GetValue('Set_TimeoutSec');
-        $this->SetTimerInterval('AutoOff', $sec * 1000);
-    }
-
-    public function AutoOff()
-    {
+        // Szene sichern
         $this->storeCurrentScene();
-        $lights = json_decode($this->ReadPropertyString('Lights'), true);
 
-        foreach ($lights as $light) {
-            $varID = $light['VarID'];
-            if (@IPS_VariableExists($varID)) {
-                if ($light['VarType'] === 'Dimmer') {
-                    RequestAction($varID, 0);
-                } elseif ($light['VarType'] === 'Switch') {
-                    RequestAction($varID, false);
-                }
+        // Alles aus
+        foreach ($this->getLights() as $light) {
+            $id = (int)($light['VarID'] ?? 0);
+            if (!$id || !@IPS_VariableExists($id)) continue;
+
+            $type = $light['VarType'] ?? 'Dimmer';
+            if ($type === 'Switch') {
+                @RequestAction($id, false);
+            } else { // Dimmer
+                @RequestAction($id, $this->pctToRaw($id, 0));
             }
         }
-
         $this->SetTimerInterval('AutoOff', 0);
     }
 
-    // Szene sichern
-    private function storeCurrentScene()
+    /* ===== Helpers ===== */
+
+    // Konvertiert Prozent (0..100) in Rohwert entsprechend Profil (0..100 oder 0..255)
+    private function pctToRaw(int $varID, int $pct): int
     {
-        $lights = json_decode($this->ReadPropertyString('Lights'), true);
-        $scene = [];
+        $pct = max(0, min(100, $pct));
+        $v = IPS_GetVariable($varID);
+        $pname = $v['VariableCustomProfile'] ?: $v['VariableProfile'];
+        if ($pname === '') return $pct;
+        $prof = IPS_GetVariableProfile($pname);
+        $max  = (float)($prof['MaxValue'] ?? 100);
+        return (int)round($pct * $max / 100.0);
+    }
 
-        foreach ($lights as $light) {
-            $varID = $light['VarID'];
-            if (@IPS_VariableExists($varID)) {
-                $scene[$varID] = GetValue($varID);
-            }
+    // prüft bei Dimmern, ob "an" (roh != 0)
+    private function isNonZero(int $varID, float $raw): bool
+    {
+        $v = IPS_GetVariable($varID);
+        $pname = $v['VariableCustomProfile'] ?: $v['VariableProfile'];
+        if ($pname === '') return ($raw > 0.0);
+        $prof = IPS_GetVariableProfile($pname);
+        $min  = (float)($prof['MinValue'] ?? 0);
+        return ($raw > $min);
+    }
+
+    private function getLights(): array
+    {
+        $arr = @json_decode($this->ReadPropertyString('Lights'), true);
+        return is_array($arr) ? $arr : [];
+    }
+
+    // akzeptiert sowohl [1,2,3] als auch [{var:1},{var:2}]
+    private function getIDList(string $prop): array
+    {
+        $raw = @json_decode($this->ReadPropertyString($prop), true);
+        if (!is_array($raw)) return [];
+        $ids = [];
+        foreach ($raw as $row) {
+            if (is_array($row) && isset($row['var'])) $ids[] = (int)$row['var'];
+            else                                      $ids[] = (int)$row;
         }
+        // nur existierende Variablen zurückgeben
+        return array_values(array_unique(array_filter($ids, fn($id) => $id > 0 && @IPS_VariableExists($id))));
+    }
 
+    private function storeCurrentScene(): void
+    {
+        $scene = [];
+        foreach ($this->getLights() as $light) {
+            $id = (int)($light['VarID'] ?? 0);
+            if (!$id || !@IPS_VariableExists($id)) continue;
+            $scene[(string)$id] = @GetValue($id);
+        }
         $this->WriteAttributeString('SceneRestore', json_encode($scene));
     }
 
-    private function restoreScene(array $scene)
+    private function restoreScene(array $scene): void
     {
-        foreach ($scene as $varID => $val) {
-            if (@IPS_VariableExists($varID)) {
-                RequestAction($varID, $val);
-            }
+        foreach ($scene as $id => $val) {
+            $vid = (int)$id;
+            if (!@IPS_VariableExists($vid)) continue;
+            @RequestAction($vid, $val);
         }
         $this->WriteAttributeString('SceneRestore', json_encode([]));
     }
 
-    // Debug-Buttons
+    /* ===== Debug-Buttons (Wrapper) ===== */
     public function DebugStoreScene(): void
     {
         $this->WriteAttributeString('SceneRestore', json_encode($this->captureCurrentScene()));
         $this->SendDebug('DebugStoreScene', 'Scene stored', 0);
     }
-
     public function DebugRestoreScene(): void
     {
-        $scene = json_decode($this->ReadAttributeString('SceneRestore'), true);
+        $scene = @json_decode($this->ReadAttributeString('SceneRestore'), true) ?: [];
         $this->restoreScene($scene);
         $this->SendDebug('DebugRestoreScene', 'Scene restored', 0);
     }
-
     public function DebugClearScene(): void
     {
         $this->WriteAttributeString('SceneRestore', json_encode([]));
         $this->SendDebug('DebugClearScene', 'Scene cleared', 0);
     }
-
     private function captureCurrentScene(): array
     {
-        $lights = json_decode($this->ReadPropertyString('Lights'), true);
         $scene = [];
-        foreach ($lights as $light) {
-            $varID = $light['VarID'];
-            if (@IPS_VariableExists($varID)) {
-                $scene[$varID] = GetValue($varID);
+        foreach ($this->getLights() as $light) {
+            $id = (int)($light['VarID'] ?? 0);
+            if ($id > 0 && @IPS_VariableExists($id)) {
+                $scene[(string)$id] = @GetValue($id);
             }
         }
         return $scene;
     }
 
-    // Öffentliche Wrapper-Methoden (werden zu RML_* generiert)
+    /* ===== Öffentliche Komfort-Wrapper: erzeugen RML_* ===== */
     public function SetTimeoutSec(int $seconds): void
     {
         $this->RequestAction('Set_TimeoutSec', $seconds);
