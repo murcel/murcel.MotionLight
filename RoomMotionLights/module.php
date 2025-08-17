@@ -82,56 +82,57 @@ public function GetConfigurationForm(): string
                 ['type' => 'SelectVariable', 'name' => 'MotionVars', 'caption' => 'Melder (mehrfach)', 'multiple' => true]
             ]],
             ['type' => 'ExpansionPanel', 'caption' => 'Lichter', 'items' => [
-                [
-                    'type' => 'List',
-                    'name' => 'Lights',
-                    'caption' => 'Akteure',
-                    'columns' => [
-                        [
-                            'caption' => 'Typ',
-                            'name'    => 'type',
-                            'width'   => '120px',
-                            'add'     => 'dimmer',
-                            'edit'    => [
-                                'type'    => 'Select',
-                                'options' => [
-                                    ['caption' => 'Dimmer',  'value' => 'dimmer'],
-                                    ['caption' => 'Schalter','value' => 'switch']
-                                ]
-                            ]
-                        ],
-                        [
-                            'caption' => 'Variable',
-                            'name'    => 'var',
-                            'width'   => '250px',
-                            'add'     => 0,                       // <-- wichtig
-                            'edit'    => ['type' => 'SelectVariable']
-                        ],
-                        [
-                            'caption' => 'SwitchVar (optional)',
-                            'name'    => 'switchVar',
-                            'width'   => '220px',
-                            'add'     => 0,                       // <-- wichtig
-                            'edit'    => ['type' => 'SelectVariable']
-                        ],
-                        [
-                            'caption' => 'Range',
-                            'name'    => 'range',
-                            'width'   => '120px',
-                            'add'     => '0..100',
-                            'edit'    => [
-                                'type'    => 'Select',
-                                'options' => [
-                                    ['caption' => '0..100', 'value' => '0..100'],
-                                    ['caption' => '0..255', 'value' => '0..255']
-                                ]
-                            ]
-                        ]
-                    ],
-                    'add'    => true,
-                    'delete' => true
+    [
+        'type' => 'List',
+        'name' => 'Lights',
+        'caption' => 'Akteure',
+        'columns' => [
+            [
+                'caption' => 'Typ',
+                'name'    => 'type',
+                'width'   => '120px',
+                'add'     => 'dimmer',
+                'edit'    => [
+                    'type' => 'Select',
+                    'options' => [
+                        ['caption' => 'Dimmer',  'value' => 'dimmer'],
+                        ['caption' => 'Schalter','value' => 'switch']
+                    ]
                 ]
-            ]],
+            ],
+            [
+                'caption' => 'Helligkeitsvariable',
+                'name'    => 'var',
+                'width'   => '260px',
+                'add'     => 0,
+                'edit'    => ['type' => 'SelectVariable']
+            ],
+            [
+                'caption' => 'Ein/Aus/Status-Variable (optional)',
+                'name'    => 'switchVar',
+                'width'   => '260px',
+                'add'     => 0,
+                'edit'    => ['type' => 'SelectVariable']
+            ],
+            [
+                'caption' => 'Range',
+                'name'    => 'range',
+                'width'   => '140px',
+                'add'     => 'auto',
+                'edit'    => [
+                    'type' => 'Select',
+                    'options' => [
+                        ['caption' => 'auto (aus Profil)', 'value' => 'auto'],
+                        ['caption' => '0..100',            'value' => '0..100'],
+                        ['caption' => '0..255',            'value' => '0..255']
+                    ]
+                ]
+            ]
+        ],
+        'add'    => true,
+        'delete' => true
+    ]
+]],
             ['type' => 'ExpansionPanel', 'caption' => 'Stati (Inhibits)', 'items' => [
                 ['type' => 'SelectVariable', 'name' => 'InhibitVars',   'caption' => 'Raum-Stati',    'multiple' => true],
                 ['type' => 'SelectVariable', 'name' => 'GlobalInhibits','caption' => 'Globale Stati', 'multiple' => true]
@@ -239,6 +240,42 @@ public function GetConfigurationForm(): string
     }
 
     /* ================= Helper ================= */
+private function detectRangeFromProfile(int $varID): string
+{
+    if (!IPS_VariableExists($varID)) {
+        return '0..100';
+    }
+    $v = IPS_GetVariable($varID);
+    $profile = $v['VariableCustomProfile'] ?: $v['VariableProfile']; // custom first
+    if ($profile === '') {
+        // fallback: grob nach Typ werten
+        return ($v['VariableType'] === VARIABLETYPE_INTEGER) ? '0..255' : '0..100';
+    }
+    // Profilauflösung
+    $p = IPS_GetVariableProfile($profile);
+    $min = $p['MinValue'] ?? 0.0;
+    $max = $p['MaxValue'] ?? 100.0;
+
+    // sehr häufige Fälle
+    if (stripos($profile, 'Intensity') !== false) {
+        // ~Intensity.100, ~Intensity.255 etc.
+        if ($max > 100.0) return '0..255';
+        return '0..100';
+    }
+    // generisch anhand Maxwert entscheiden
+    if ($max > 100.0) return '0..255';
+    return '0..100';
+}
+
+private function effectiveRange(array $actor): string
+{
+    $r = (string)($actor['range'] ?? 'auto');
+    if ($r === '' || $r === 'auto') {
+        $vid = (int)($actor['var'] ?? 0);
+        return $this->detectRangeFromProfile($vid);
+    }
+    return $r;
+}
 private function getRegisteredIDs(): array
 {
     $raw = $this->ReadAttributeString('RegisteredIDs');
@@ -309,53 +346,52 @@ private function setRegisteredIDs(array $ids): void
         @RequestAction($varID, $state);
     }
 
-    private function getDimmerPct(array $actor): int
-    {
-        $varID = (int)($actor['var'] ?? 0);
-        if ($varID <= 0 || !IPS_VariableExists($varID)) {
-            return 0;
-        }
-        $range = (string)($actor['range'] ?? '0..100');
-        $raw   = @GetValue($varID);
-        $rawF  = is_string($raw) ? floatval(str_replace(',', '.', $raw)) : (float)$raw;
+private function getDimmerPct(array $actor): int
+{
+    $varID = (int)($actor['var'] ?? 0);
+    if ($varID <= 0 || !IPS_VariableExists($varID)) {
+        return 0;
+    }
+    $range = $this->effectiveRange($actor);
+    $raw   = @GetValue($varID);
+    $rawF  = is_string($raw) ? floatval(str_replace(',', '.', $raw)) : (float)$raw;
 
-        if ($range === '0..255') {
-            $pct = (int)round(($rawF / 255.0) * 100.0);
-        } else {
-            // 0..100 (evtl. 0..1 abfangen)
-            if ($rawF > 0.0 && $rawF <= 1.0) {
-                $rawF *= 100.0;
-            }
-            $pct = (int)round($rawF);
+    if ($range === '0..255') {
+        $pct = (int)round(($rawF / 255.0) * 100.0);
+    } else {
+        if ($rawF > 0.0 && $rawF <= 1.0) {
+            $rawF *= 100.0; // 0..1 → 0..100
         }
-        return max(0, min(100, $pct));
+        $pct = (int)round($rawF);
+    }
+    return max(0, min(100, $pct));
+}
+
+private function setDimmerPct(array $actor, int $pct): void
+{
+    $pct = max(0, min(100, $pct));
+    $varID = (int)($actor['var'] ?? 0);
+    if ($varID <= 0 || !IPS_VariableExists($varID)) {
+        return;
+    }
+    $range = $this->effectiveRange($actor);
+
+    // ggf. separate Schaltvariable einschalten
+    if ($pct > 0 && !empty($actor['switchVar']) && IPS_VariableExists((int)$actor['switchVar'])) {
+        @RequestAction((int)$actor['switchVar'], true);
     }
 
-    private function setDimmerPct(array $actor, int $pct): void
-    {
-        $pct = max(0, min(100, $pct));
-        $varID = (int)($actor['var'] ?? 0);
-        if ($varID <= 0 || !IPS_VariableExists($varID)) {
-            return;
-        }
-        $range = (string)($actor['range'] ?? '0..100');
-
-        // optional separate Schaltvariable
-        if ($pct > 0 && !empty($actor['switchVar']) && IPS_VariableExists((int)$actor['switchVar'])) {
-            @RequestAction((int)$actor['switchVar'], true);
-        }
-
-        if ($range === '0..255') {
-            $val = (int)round($pct * 255 / 100);
-            @RequestAction($varID, $val);
-        } else {
-            @RequestAction($varID, $pct);
-        }
-
-        if ($pct === 0 && !empty($actor['switchVar']) && IPS_VariableExists((int)$actor['switchVar'])) {
-            @RequestAction((int)$actor['switchVar'], false);
-        }
+    if ($range === '0..255') {
+        $val = (int)round($pct * 255 / 100);
+        @RequestAction($varID, $val);
+    } else {
+        @RequestAction($varID, $pct);
     }
+
+    if ($pct === 0 && !empty($actor['switchVar']) && IPS_VariableExists((int)$actor['switchVar'])) {
+        @RequestAction((int)$actor['switchVar'], false);
+    }
+}
 
     
 }
