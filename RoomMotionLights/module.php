@@ -25,32 +25,54 @@ class RoomMotionLights extends IPSModule
         // --- Instanz-Variablen / Timer ---
         $this->RegisterVariableBoolean('Override', 'Automatik (Auto-ON) deaktivieren', '~Switch', 1);
         $this->RegisterTimer('AutoOff', 0, 'RML_AutoOff($_IPS[\'TARGET\']);');
+
+        $this->RegisterAttributeString('RegisteredIDs', '[]'); // merkt registrierte Message-IDs
     }
 
-    public function ApplyChanges()
-    {
-        parent::ApplyChanges();
+public function ApplyChanges()
+{
+    parent::ApplyChanges();
 
-        // Alle Messages abmelden (sauber neu)
-        $this->UnregisterAllMessages();
-
-        // Auf Updates der Motion-Variablen hören
-        foreach ($this->getMotionVars() as $vid) {
-            if (IPS_VariableExists($vid)) {
-                $this->RegisterMessage($vid, self::VM_UPDATE);
-            }
-        }
-        // Auf Updates der Licht-Variablen hören (für manuelles Auto-Off)
-        foreach ($this->getLights() as $a) {
-            if (!empty($a['var']) && IPS_VariableExists((int)$a['var'])) {
-                $this->RegisterMessage((int)$a['var'], self::VM_UPDATE);
-            }
-            if (!empty($a['switchVar']) && IPS_VariableExists((int)$a['switchVar'])) {
-                $this->RegisterMessage((int)$a['switchVar'], self::VM_UPDATE);
-            }
+    // alte Registrierungen sauber entfernen
+    $prev = $this->getRegisteredIDs();
+    foreach ($prev as $id) {
+        if (IPS_VariableExists($id)) {
+            @ $this->UnregisterMessage($id, self::VM_UPDATE);
         }
     }
 
+    // neue Registrierungen aufbauen
+    $newIDs = [];
+
+    // Motion-Variablen
+    foreach ($this->getMotionVars() as $vid) {
+        if (IPS_VariableExists($vid)) {
+            $this->RegisterMessage($vid, self::VM_UPDATE);
+            $newIDs[] = $vid;
+        }
+    }
+
+    // Licht-Variablen (Helligkeit/Schalter)
+    foreach ($this->getLights() as $a) {
+        $v = (int)($a['var'] ?? 0);
+        if ($v > 0 && IPS_VariableExists($v)) {
+            $this->RegisterMessage($v, self::VM_UPDATE);
+            $newIDs[] = $v;
+        }
+        $sv = (int)($a['switchVar'] ?? 0);
+        if ($sv > 0 && IPS_VariableExists($sv)) {
+            $this->RegisterMessage($sv, self::VM_UPDATE);
+            $newIDs[] = $sv;
+        }
+    }
+
+    // (optional) TimeoutVar überwachen? normalerweise nicht nötig für MessageSink
+    // $tVar = $this->ReadPropertyInteger('TimeoutVar');
+    // if ($tVar > 0 && IPS_VariableExists($tVar)) { ... }
+
+    // Liste speichern, damit wir sie beim nächsten ApplyChanges wieder deregistrieren können
+    $this->setRegisteredIDs($newIDs);
+}
     // === Config-Form (einfach) ===
     public function GetConfigurationForm(): string
     {
@@ -204,6 +226,18 @@ class RoomMotionLights extends IPSModule
     }
 
     /* ================= Helper ================= */
+private function getRegisteredIDs(): array
+{
+    $raw = $this->ReadAttributeString('RegisteredIDs');
+    $arr = @json_decode($raw, true);
+    return is_array($arr) ? array_map('intval', $arr) : [];
+}
+
+private function setRegisteredIDs(array $ids): void
+{
+    $ids = array_values(array_unique(array_map('intval', $ids)));
+    $this->WriteAttributeString('RegisteredIDs', json_encode($ids));
+}
 
     private function getMotionVars(): array
     {
@@ -310,19 +344,5 @@ class RoomMotionLights extends IPSModule
         }
     }
 
-    private function UnregisterAllMessages(): void
-    {
-        // Holt alle registrierten Nachrichten und deregistriert sie
-        $refs = @IPS_GetMessageList();
-        if (!is_array($refs)) {
-            return;
-        }
-        foreach ($refs as $senderID => $list) {
-            foreach ($list as $entry) {
-                if (($entry['Message'] ?? 0) === self::VM_UPDATE && ($entry['ReceiverID'] ?? 0) === $this->InstanceID) {
-                    @IPS_UnregisterMessage((int)$senderID, self::VM_UPDATE);
-                }
-            }
-        }
-    }
+    
 }
