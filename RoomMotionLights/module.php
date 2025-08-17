@@ -154,10 +154,12 @@ class RoomMotionLights extends IPSModule
                 ]],
                 ['type' => 'ExpansionPanel', 'caption' => 'Lux (optional)', 'items' => [
                     ['type' => 'SelectVariable', 'name' => 'LuxVar', 'caption' => 'Lux-Variable'],
+                    ['type'    => 'NumberSpinner','name'    => 'LuxThreshold','caption' => 'Lux-Schwelle'],
                     ['type' => 'Label', 'caption' => 'Lux max, Timeout, Default Dim & Auto-Off sind als Instanzvariablen steuerbar.']
                 ]]
             ],
             'actions' => [
+                ['type'    => 'Label','caption' => '--- Debug ---'],
                 ['type' => 'Button', 'caption' => 'Szene jetzt sichern (Live → Restore)', 'onClick' => 'RML_DebugStoreScene($id);'],
                 ['type' => 'Button', 'caption' => 'Szene-Backup löschen', 'onClick' => 'RML_DebugClearScene($id);'],
                 ['type' => 'Button', 'caption' => 'Test: Auto-Off jetzt', 'onClick' => 'RML_AutoOff($id);']
