@@ -3,31 +3,56 @@ declare(strict_types=1);
 
 class RoomMotionLights extends IPSModule
 {
-    /* ====== Konstanten ====== */
     private const VM_UPDATE = 10603; // VariableManager: Update
 
-    /* ====== Lifecycle ====== */
+    /* ================= Lifecycle ================= */
     public function Create()
     {
         parent::Create();
 
-        // Properties
-        $this->RegisterPropertyString ('MotionVars', '[]');       // Liste (List) -> [{var:int}]
-        $this->RegisterPropertyString ('InhibitVars', '[]');      // Liste (List) -> [{var:int}]
-        $this->RegisterPropertyString ('GlobalInhibits', '[]');   // Liste (List) -> [{var:int}]
-        $this->RegisterPropertyString ('Lights', '[]');           // Liste (List) -> [{type, var, switchVar, range}]
-        $this->RegisterPropertyInteger('TimeoutSec', 60);         // Fallback (Sek.)
-        $this->RegisterPropertyInteger('TimeoutVar', 0);          // VariableID (optional, überschreibt TimeoutSec)
-        $this->RegisterPropertyInteger('DefaultDim', 60);         // % für Dimmer
-        $this->RegisterPropertyBoolean('ManualAutoOff', true);    // Timer auch bei manuellem Einschalten
-        $this->RegisterPropertyInteger('LuxVar', 0);              // optional
-        $this->RegisterPropertyInteger('LuxMax', 50);             // optional
+        // ---- Properties (Fallbacks / Konfig per Formular) ----
+        $this->RegisterPropertyString ('MotionVars', '[]');       // [{var:int}]
+        $this->RegisterPropertyString ('InhibitVars', '[]');      // [{var:int}]
+        $this->RegisterPropertyString ('GlobalInhibits', '[]');   // [{var:int}]
+        $this->RegisterPropertyString ('Lights', '[]');           // [{type, var, switchVar, range}]
+        $this->RegisterPropertyInteger('TimeoutSec', 60);
+        $this->RegisterPropertyInteger('TimeoutVar', 0);
+        $this->RegisterPropertyInteger('DefaultDim', 60);
+        $this->RegisterPropertyBoolean('ManualAutoOff', true);
+        $this->RegisterPropertyInteger('LuxVar', 0);
+        $this->RegisterPropertyInteger('LuxMax', 50);
 
-        // States/Timer
+        // ---- Laufzeit-Settings als steuerbare Variablen (für View) ----
+        $this->ensureProfiles();
+        $this->RegisterVariableInteger('Set_TimeoutSec', 'Timeout (s)', 'RML.TimeoutSec', 2);
+        $this->RegisterVariableInteger('Set_DefaultDim', 'Default Dim (%)', '~Intensity.100', 3);
+        $this->RegisterVariableInteger('Set_LuxMax', 'Lux max', 'RML.LuxMax', 4);
+        $this->RegisterVariableBoolean('Set_ManualAutoOff', 'Manuelles Auto-Off aktiv', '~Switch', 5);
+        $this->EnableAction('Set_TimeoutSec');
+        $this->EnableAction('Set_DefaultDim');
+        $this->EnableAction('Set_LuxMax');
+        $this->EnableAction('Set_ManualAutoOff');
+
+        // Erstwerte aus Properties setzen (nur beim ersten Anlegen sind die Variablen 0/uninitialized)
+        if ($this->GetValue('Set_TimeoutSec') === 0) {
+            @SetValueInteger($this->GetIDForIdent('Set_TimeoutSec'), max(5, (int)$this->ReadPropertyInteger('TimeoutSec')));
+        }
+        if ($this->GetValue('Set_DefaultDim') === 0) {
+            @SetValueInteger($this->GetIDForIdent('Set_DefaultDim'), max(1, (int)$this->ReadPropertyInteger('DefaultDim')));
+        }
+        if ($this->GetValue('Set_LuxMax') === 0) {
+            @SetValueInteger($this->GetIDForIdent('Set_LuxMax'), max(0, (int)$this->ReadPropertyInteger('LuxMax')));
+        }
+        // ManualAutoOff: nur setzen, wenn Var noch nicht existierte (ansonsten User-Wert respektieren)
+        if (!IPS_VariableExists(@$this->GetIDForIdent('Set_ManualAutoOff')) || $this->GetValue('Set_ManualAutoOff') === false) {
+            @SetValueBoolean($this->GetIDForIdent('Set_ManualAutoOff'), (bool)$this->ReadPropertyBoolean('ManualAutoOff'));
+        }
+
+        // ---- Sonstige States/Timer ----
         $this->RegisterVariableBoolean('Override', 'Automatik (Auto-ON) deaktivieren', '~Switch', 1);
         $this->RegisterTimer('AutoOff', 0, 'RML_AutoOff($_IPS[\'TARGET\']);');
 
-        // Attribute: gemerkte Registrierungen für MessageSink
+        // Registrierte Message-IDs merken
         $this->RegisterAttributeString('RegisteredIDs', '[]');
     }
 
@@ -35,22 +60,24 @@ class RoomMotionLights extends IPSModule
     {
         parent::ApplyChanges();
 
-        // Vorherige Registrierungen sauber lösen
+        // Profile sicherstellen, falls durch Update neu gestartet
+        $this->ensureProfiles();
+
+        // Vorherige Registrierungen lösen
         $prev = $this->getRegisteredIDs();
         foreach ($prev as $id) {
             if (@IPS_ObjectExists($id)) {
                 @$this->UnregisterMessage($id, self::VM_UPDATE);
             }
         }
-
         $new = [];
 
-        // Bewegungsmelder registrieren
+        // Bewegungsmelder
         foreach ($this->getMotionVars() as $vid) {
             $this->RegisterMessage($vid, self::VM_UPDATE);
             $new[] = $vid;
         }
-        // Inhibits registrieren
+        // Inhibits (Raum + global)
         foreach ($this->getInhibitVars() as $vid) {
             $this->RegisterMessage($vid, self::VM_UPDATE);
             $new[] = $vid;
@@ -59,101 +86,72 @@ class RoomMotionLights extends IPSModule
             $this->RegisterMessage($vid, self::VM_UPDATE);
             $new[] = $vid;
         }
-        // Lichter (Dimmer/Schalter) registrieren (für manuelles Auto-Off)
+        // Lichter (manuelles Auto-Off)
         foreach ($this->getLights() as $a) {
             $v  = (int)($a['var'] ?? 0);
             $sv = (int)($a['switchVar'] ?? 0);
             if ($v  > 0 && @IPS_VariableExists($v))  { $this->RegisterMessage($v,  self::VM_UPDATE); $new[] = $v; }
             if ($sv > 0 && @IPS_VariableExists($sv)) { $this->RegisterMessage($sv, self::VM_UPDATE); $new[] = $sv; }
         }
-
         $this->setRegisteredIDs($new);
     }
 
-    /* ====== Formular ====== */
+    /* ================= Formular ================= */
     public function GetConfigurationForm(): string
     {
         return json_encode([
             'elements' => [
-                // Bewegungsmelder als List (robust, kein multiple-Select mehr)
-                ['type' => 'ExpansionPanel', 'caption' => 'Bewegungsmelder', 'items' => [
-                    [
-                        'type' => 'List', 'name' => 'MotionVars', 'caption' => 'Melder',
-                        'columns' => [[
-                            'caption' => 'Variable', 'name' => 'var', 'width' => '320px',
-                            'add' => 0, 'edit' => ['type' => 'SelectVariable']
-                        ]],
-                        'add' => true, 'delete' => true
-                    ]
-                ]],
-                // Lichter
-                ['type' => 'ExpansionPanel', 'caption' => 'Lichter', 'items' => [
-                    [
-                        'type' => 'List', 'name' => 'Lights', 'caption' => 'Akteure',
-                        'columns' => [
-                            [
-                                'caption' => 'Typ', 'name' => 'type', 'width' => '120px', 'add' => 'dimmer',
-                                'edit' => [
-                                    'type' => 'Select',
-                                    'options' => [
-                                        ['caption' => 'Dimmer',  'value' => 'dimmer'],
-                                        ['caption' => 'Schalter','value' => 'switch']
-                                    ]
-                                ]
-                            ],
-                            [
-                                'caption' => 'Helligkeitsvariable', 'name' => 'var', 'width' => '260px', 'add' => 0,
-                                'edit' => ['type' => 'SelectVariable']
-                            ],
-                            [
-                                'caption' => 'Ein/Aus/Status-Variable (optional)', 'name' => 'switchVar', 'width' => '260px', 'add' => 0,
-                                'edit' => ['type' => 'SelectVariable']
-                            ],
-                            [
-                                'caption' => 'Range', 'name' => 'range', 'width' => '160px', 'add' => 'auto',
-                                'edit' => [
-                                    'type' => 'Select',
-                                    'options' => [
-                                        ['caption' => 'auto (aus Profil)', 'value' => 'auto'],
-                                        ['caption' => '0..100',            'value' => '0..100'],
-                                        ['caption' => '0..255',            'value' => '0..255']
-                                    ]
-                                ]
-                            ]
-                        ],
-                        'add' => true, 'delete' => true
-                    ]
-                ]],
-                // Stati (Inhibits)
-                ['type' => 'ExpansionPanel', 'caption' => 'Stati (Inhibits)', 'items' => [
-                    [
-                        'type' => 'List', 'name' => 'InhibitVars', 'caption' => 'Raum-Stati',
-                        'columns' => [[
-                            'caption' => 'Variable', 'name' => 'var', 'width' => '320px',
-                            'add' => 0, 'edit' => ['type' => 'SelectVariable']
-                        ]],
-                        'add' => true, 'delete' => true
+                ['type' => 'ExpansionPanel', 'caption' => 'Bewegungsmelder', 'items' => [[
+                    'type' => 'List', 'name' => 'MotionVars', 'caption' => 'Melder',
+                    'columns' => [[
+                        'caption' => 'Variable', 'name' => 'var', 'width' => '320px',
+                        'add' => 0, 'edit' => ['type' => 'SelectVariable']
+                    ]],
+                    'add' => true, 'delete' => true
+                ]]],
+                ['type' => 'ExpansionPanel', 'caption' => 'Lichter', 'items' => [[
+                    'type' => 'List', 'name' => 'Lights', 'caption' => 'Akteure',
+                    'columns' => [
+                        ['caption' => 'Typ', 'name' => 'type', 'width' => '120px', 'add' => 'dimmer',
+                         'edit' => ['type' => 'Select', 'options' => [
+                             ['caption' => 'Dimmer',  'value' => 'dimmer'],
+                             ['caption' => 'Schalter','value' => 'switch']
+                         ]]],
+                        ['caption' => 'Helligkeitsvariable', 'name' => 'var', 'width' => '260px', 'add' => 0,
+                         'edit' => ['type' => 'SelectVariable']],
+                        ['caption' => 'Ein/Aus/Status-Variable (optional)', 'name' => 'switchVar', 'width' => '260px', 'add' => 0,
+                         'edit' => ['type' => 'SelectVariable']],
+                        ['caption' => 'Range', 'name' => 'range', 'width' => '160px', 'add' => 'auto',
+                         'edit' => ['type' => 'Select', 'options' => [
+                             ['caption' => 'auto (aus Profil)', 'value' => 'auto'],
+                             ['caption' => '0..100',            'value' => '0..100'],
+                             ['caption' => '0..255',            'value' => '0..255']
+                         ]]]
                     ],
-                    [
-                        'type' => 'List', 'name' => 'GlobalInhibits', 'caption' => 'Globale Stati',
-                        'columns' => [[
-                            'caption' => 'Variable', 'name' => 'var', 'width' => '320px',
-                            'add' => 0, 'edit' => ['type' => 'SelectVariable']
-                        ]],
-                        'add' => true, 'delete' => true
-                    ]
+                    'add' => true, 'delete' => true
+                ]]],
+                ['type' => 'ExpansionPanel', 'caption' => 'Stati (Inhibits)', 'items' => [
+                    ['type' => 'List', 'name' => 'InhibitVars', 'caption' => 'Raum-Stati',
+                     'columns' => [[
+                         'caption' => 'Variable', 'name' => 'var', 'width' => '320px',
+                         'add' => 0, 'edit' => ['type' => 'SelectVariable']
+                     ]], 'add' => true, 'delete' => true],
+                    ['type' => 'List', 'name' => 'GlobalInhibits', 'caption' => 'Globale Stati',
+                     'columns' => [[
+                         'caption' => 'Variable', 'name' => 'var', 'width' => '320px',
+                         'add' => 0, 'edit' => ['type' => 'SelectVariable']
+                     ]], 'add' => true, 'delete' => true]
                 ]],
-                // Lux (optional)
                 ['type' => 'ExpansionPanel', 'caption' => 'Lux (optional)', 'items' => [
                     ['type' => 'SelectVariable', 'name' => 'LuxVar', 'caption' => 'Lux-Variable'],
-                    ['type' => 'NumberSpinner',  'name' => 'LuxMax', 'caption' => 'Lux max', 'minimum' => 0, 'maximum' => 100000]
+                    ['type' => 'Label', 'caption' => 'Lux max kann in der Instanz als Variable "Lux max" geändert werden.']
                 ]],
-                // Verhalten
                 ['type' => 'ExpansionPanel', 'caption' => 'Verhalten', 'items' => [
+                    ['type' => 'Label', 'caption' => 'Timeout, Default Dim, Lux max & Manuelles Auto-Off sind als Instanzvariablen verfügbar.'],
                     ['type' => 'NumberSpinner',  'name' => 'TimeoutSec', 'caption' => 'Timeout Standard (s)', 'minimum' => 5, 'maximum' => 3600],
                     ['type' => 'SelectVariable', 'name' => 'TimeoutVar', 'caption' => 'Timeout aus Variable (optional)'],
                     ['type' => 'NumberSpinner',  'name' => 'DefaultDim', 'caption' => 'Default Dim (%)', 'minimum' => 1, 'maximum' => 100],
-                    ['type' => 'CheckBox',       'name' => 'ManualAutoOff', 'caption' => 'Manuelles Auto-Off aktiv']
+                    ['type' => 'CheckBox',       'name' => 'ManualAutoOff', 'caption' => 'Manuelles Auto-Off aktiv (Initialwert für Variable)']
                 ]]
             ],
             'actions' => [
@@ -163,7 +161,7 @@ class RoomMotionLights extends IPSModule
         ]);
     }
 
-    /* ====== Timer: Auto-Off ====== */
+    /* ================= Timer ================= */
     public function AutoOff(): void
     {
         foreach ($this->getLights() as $a) {
@@ -177,20 +175,17 @@ class RoomMotionLights extends IPSModule
         $this->SetTimerInterval('AutoOff', 0);
     }
 
-    /* ====== MessageSink ====== */
+    /* ================= MessageSink ================= */
     public function MessageSink($TimeStamp, $SenderID, $Message, $Data)
     {
         if ($Message !== self::VM_UPDATE) return;
 
-        // 1) Bewegungsmelder?
+        // 1) Bewegung?
         if (in_array($SenderID, $this->getMotionVars(), true)) {
-            // Nur auf TRUE reagieren
-            if (!@GetValueBoolean($SenderID)) return;
+            if (!@GetValueBoolean($SenderID)) return;      // nur auf TRUE
+            if ($this->GetValue('Override')) return;       // Auto-ON blockiert
 
-            // Blocker: Override?
-            if ($this->GetValue('Override')) return;
-
-            // Blocker: Inhibits (Raum + Global)
+            // Inhibits
             foreach ($this->getInhibitVars() as $vid) {
                 if (@GetValueBoolean($vid)) return;
             }
@@ -198,33 +193,31 @@ class RoomMotionLights extends IPSModule
                 if (@GetValueBoolean($vid)) return;
             }
 
-            // Lux optional
+            // Lux-Grenze (optional)
             $luxVar = $this->ReadPropertyInteger('LuxVar');
             if ($luxVar > 0 && @IPS_VariableExists($luxVar)) {
                 $lux = @GetValue($luxVar);
-                if (is_numeric($lux) && $lux > $this->ReadPropertyInteger('LuxMax')) {
-                    return;
-                }
+                if (is_numeric($lux) && $lux > $this->getSettingLuxMax()) return;
             }
 
-            // Einschalten (DefaultDim % für Dimmer, Switch ON)
-            $defaultPct = (int)$this->ReadPropertyInteger('DefaultDim');
+            // Einschalten
+            $target = $this->getSettingDefaultDim();
             foreach ($this->getLights() as $a) {
                 $type = $a['type'] ?? '';
                 if ($type === 'switch') {
                     $this->setSwitch((int)$a['var'], true);
                 } elseif ($type === 'dimmer') {
-                    $this->setDimmerPct($a, $defaultPct);
+                    $this->setDimmerPct($a, $target);
                 }
             }
 
-            // Timer (retriggert bei jeder Bewegung)
+            // Auto-Off Timer
             $this->armAutoOffTimer();
             return;
         }
 
-        // 2) Manuelle Änderungen an Lichtern → optional Auto-Off starten
-        if ($this->ReadPropertyBoolean('ManualAutoOff')) {
+        // 2) Manuelle Lichtänderungen → optional Auto-Off
+        if ($this->getSettingManualAutoOff()) {
             foreach ($this->getLights() as $a) {
                 $v  = (int)($a['var'] ?? 0);
                 $sv = (int)($a['switchVar'] ?? 0);
@@ -244,7 +237,106 @@ class RoomMotionLights extends IPSModule
         }
     }
 
-    /* ====== Helper: Properties lesen ====== */
+    /* ================= ActionHandler (View schreibt hier rein) ================= */
+    public function RequestAction($Ident, $Value)
+    {
+        switch ($Ident) {
+            case 'Set_TimeoutSec':
+                $val = max(5, min(3600, (int)$Value));
+                SetValueInteger($this->GetIDForIdent('Set_TimeoutSec'), $val);
+                // Wenn Timer läuft, neu setzen
+                if ($this->GetTimerInterval('AutoOff') > 0) {
+                    $this->armAutoOffTimer();
+                }
+                break;
+
+            case 'Set_DefaultDim':
+                $val = max(1, min(100, (int)$Value));
+                SetValueInteger($this->GetIDForIdent('Set_DefaultDim'), $val);
+                break;
+
+            case 'Set_LuxMax':
+                $val = max(0, (int)$Value);
+                SetValueInteger($this->GetIDForIdent('Set_LuxMax'), $val);
+                break;
+
+            case 'Set_ManualAutoOff':
+                SetValueBoolean($this->GetIDForIdent('Set_ManualAutoOff'), (bool)$Value);
+                break;
+
+            case 'Override':
+                SetValueBoolean($this->GetIDForIdent('Override'), (bool)$Value);
+                break;
+
+            default:
+                // Fallback: evtl. Direktaktionen an Licht-Variablen?
+                // Wir lassen Unbekanntes in Ruhe.
+                break;
+        }
+    }
+
+    /* ================= Settings (lesen Variablen, fallback Properties) ================= */
+    private function getSettingTimeoutSec(): int
+    {
+        $t = (int)@GetValueInteger($this->GetIDForIdent('Set_TimeoutSec'));
+        if ($t <= 0) $t = (int)$this->ReadPropertyInteger('TimeoutSec');
+        return max(5, $t);
+    }
+
+    private function getSettingDefaultDim(): int
+    {
+        $d = (int)@GetValueInteger($this->GetIDForIdent('Set_DefaultDim'));
+        if ($d <= 0) $d = (int)$this->ReadPropertyInteger('DefaultDim');
+        return max(1, min(100, $d));
+    }
+
+    private function getSettingLuxMax(): int
+    {
+        $l = (int)@GetValueInteger($this->GetIDForIdent('Set_LuxMax'));
+        if ($l < 0) $l = (int)$this->ReadPropertyInteger('LuxMax');
+        return max(0, $l);
+    }
+
+    private function getSettingManualAutoOff(): bool
+    {
+        // Wenn Variable existiert, hat sie Vorrang. Sonst Property.
+        $id = @$this->GetIDForIdent('Set_ManualAutoOff');
+        if ($id && IPS_VariableExists($id)) {
+            return (bool)@GetValueBoolean($id);
+        }
+        return (bool)$this->ReadPropertyBoolean('ManualAutoOff');
+    }
+
+    /* ================= Helper: Profiles, Timer, Listen, Lights ================= */
+    private function ensureProfiles(): void
+    {
+        // Timeout (s)
+        if (!IPS_VariableProfileExists('RML.TimeoutSec')) {
+            IPS_CreateVariableProfile('RML.TimeoutSec', VARIABLETYPE_INTEGER);
+            IPS_SetVariableProfileDigits('RML.TimeoutSec', 0);
+            IPS_SetVariableProfileText('RML.TimeoutSec', '', ' s');
+            IPS_SetVariableProfileValues('RML.TimeoutSec', 5, 3600, 1);
+        }
+        // Lux max (nur Zahl)
+        if (!IPS_VariableProfileExists('RML.LuxMax')) {
+            IPS_CreateVariableProfile('RML.LuxMax', VARIABLETYPE_INTEGER);
+            IPS_SetVariableProfileDigits('RML.LuxMax', 0);
+            IPS_SetVariableProfileText('RML.LuxMax', '', ' lx');
+            IPS_SetVariableProfileValues('RML.LuxMax', 0, 100000, 1);
+        }
+    }
+
+    private function armAutoOffTimer(): void
+    {
+        // TimeoutVar (Property) überschreibt unsere Set_TimeoutSec (wie gewünscht)
+        $timeout = $this->getSettingTimeoutSec();
+        $tVar    = (int)$this->ReadPropertyInteger('TimeoutVar');
+        if ($tVar > 0 && @IPS_VariableExists($tVar)) {
+            $val = @GetValue($tVar);
+            if (is_numeric($val) && (int)$val > 0) $timeout = (int)$val;
+        }
+        $this->SetTimerInterval('AutoOff', $timeout * 1000);
+    }
 
     private function getVarListFromProperty(string $propName): array
     {
@@ -253,7 +345,7 @@ class RoomMotionLights extends IPSModule
         if (is_array($raw)) {
             foreach ($raw as $row) {
                 if (is_array($row) && isset($row['var'])) {
-                    $ids[] = (int)$row['var'];   // neues Listenformat
+                    $ids[] = (int)$row['var'];   // neues List-Format
                 } else {
                     $ids[] = (int)$row;          // Fallback: altes multiple[]-Format
                 }
@@ -274,20 +366,6 @@ class RoomMotionLights extends IPSModule
         return is_array($arr) ? $arr : [];
     }
 
-    /* ====== Helper: Timer/Auto-Off ====== */
-    private function armAutoOffTimer(): void
-    {
-        $timeout = (int)$this->ReadPropertyInteger('TimeoutSec');
-        $tVar    = (int)$this->ReadPropertyInteger('TimeoutVar');
-        if ($tVar > 0 && @IPS_VariableExists($tVar)) {
-            $val = @GetValue($tVar);
-            if (is_numeric($val) && (int)$val > 0) $timeout = (int)$val;
-        }
-        $this->SetTimerInterval('AutoOff', max(0, $timeout) * 1000);
-    }
-
-    /* ====== Helper: Dimmer/Switch ====== */
-
     private function setSwitch(int $varID, bool $state): void
     {
         if ($varID <= 0 || !@IPS_VariableExists($varID)) return;
@@ -306,7 +384,7 @@ class RoomMotionLights extends IPSModule
         if ($range === '0..255') {
             $pct = (int)round(($rawF / 255.0) * 100.0);
         } else {
-            if ($rawF > 0.0 && $rawF <= 1.0) $rawF *= 100.0; // 0..1 → 0..100
+            if ($rawF > 0.0 && $rawF <= 1.0) $rawF *= 100.0;
             $pct = (int)round($rawF);
         }
         return max(0, min(100, $pct));
@@ -320,11 +398,8 @@ class RoomMotionLights extends IPSModule
 
         $range = $this->effectiveRange($actor);
 
-        // optional: separate Ein/Aus Variable schalten
         $sv = (int)($actor['switchVar'] ?? 0);
-        if ($pct > 0 && $sv > 0 && @IPS_VariableExists($sv)) {
-            @RequestAction($sv, true);
-        }
+        if ($pct > 0 && $sv > 0 && @IPS_VariableExists($sv)) @RequestAction($sv, true);
 
         if ($range === '0..255') {
             $val = (int)round($pct * 255 / 100);
@@ -333,12 +408,8 @@ class RoomMotionLights extends IPSModule
             @RequestAction($varID, $pct);
         }
 
-        if ($pct === 0 && $sv > 0 && @IPS_VariableExists($sv)) {
-            @RequestAction($sv, false);
-        }
+        if ($pct === 0 && $sv > 0 && @IPS_VariableExists($sv)) @RequestAction($sv, false);
     }
-
-    /* ====== Helper: Range-Erkennung (generisch, aus Profil-Min/Max) ====== */
 
     private function effectiveRange(array $actor): string
     {
@@ -360,15 +431,13 @@ class RoomMotionLights extends IPSModule
         return ($max > 100.0) ? '0..255' : '0..100';
     }
 
-    /* ====== Helper: Registrierungen merken ====== */
-
+    /* ===== Registered IDs tracking ===== */
     private function getRegisteredIDs(): array
     {
         $raw = $this->ReadAttributeString('RegisteredIDs');
         $arr = @json_decode($raw, true);
         return is_array($arr) ? array_map('intval', $arr) : [];
     }
-
     private function setRegisteredIDs(array $ids): void
     {
         $ids = array_values(array_unique(array_map('intval', $ids)));
