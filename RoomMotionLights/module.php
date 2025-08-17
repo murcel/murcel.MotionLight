@@ -66,7 +66,26 @@ class RoomMotionLights extends IPSModule
         $this->RegisterAttributeString('SceneRestore',  '[]');      // gespeicherte Szene
         $this->RegisterAttributeBoolean('GuardInternal', false);    // interne Setzungen ignorieren
     }
+public function SetTimeoutSec(int $seconds): void
+{
+    // nutzt deine RequestAction-Logik (inkl. Bounds + Timer-Neuarmung)
+    $this->RequestAction('Set_TimeoutSec', $seconds);
+}
 
+public function SetDefaultDim(int $percent): void
+{
+    $this->RequestAction('Set_DefaultDim', $percent);
+}
+
+public function SetLuxMax(int $lux): void
+{
+    $this->RequestAction('Set_LuxMax', $lux);
+}
+
+public function SetManualAutoOff(bool $on): void
+{
+    $this->RequestAction('Set_ManualAutoOff', $on);
+}
     public function ApplyChanges()
     {
         parent::ApplyChanges();
