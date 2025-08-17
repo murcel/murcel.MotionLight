@@ -74,72 +74,85 @@ public function ApplyChanges()
     $this->setRegisteredIDs($newIDs);
 }
     // === Config-Form (einfach) ===
-    public function GetConfigurationForm(): string
-    {
-        return json_encode([
-            'elements' => [
-                ['type' => 'ExpansionPanel', 'caption' => 'Bewegungsmelder', 'items' => [
-                    ['type' => 'SelectVariable', 'name' => 'MotionVars', 'caption' => 'Melder (mehrfach)', 'multiple' => true]
-                ]],
-                ['type' => 'ExpansionPanel', 'caption' => 'Lichter', 'items' => [
-                    [
-                        'type' => 'List', 'name' => 'Lights', 'caption' => 'Akteure',
-                        'columns' => [
-                            [
-                                'caption' => 'Typ', 'name' => 'type', 'width' => '120px',
-                                'add' => 'dimmer',
-                                'edit' => [
-                                    'type' => 'Select',
-                                    'options' => [
-                                        ['caption' => 'Dimmer', 'value' => 'dimmer'],
-                                        ['caption' => 'Schalter', 'value' => 'switch']
-                                    ]
-                                ]
-                            ],
-                            [
-                                'caption' => 'Variable', 'name' => 'var', 'width' => '250px',
-                                'edit' => ['type' => 'SelectVariable']
-                            ],
-                            [
-                                'caption' => 'SwitchVar (optional)', 'name' => 'switchVar', 'width' => '220px',
-                                'edit' => ['type' => 'SelectVariable']
-                            ],
-                            [
-                                'caption' => 'Range', 'name' => 'range', 'width' => '120px',
-                                'add' => '0..100',
-                                'edit' => [
-                                    'type' => 'Select',
-                                    'options' => [
-                                        ['caption' => '0..100', 'value' => '0..100'],
-                                        ['caption' => '0..255', 'value' => '0..255']
-                                    ]
+public function GetConfigurationForm(): string
+{
+    return json_encode([
+        'elements' => [
+            ['type' => 'ExpansionPanel', 'caption' => 'Bewegungsmelder', 'items' => [
+                ['type' => 'SelectVariable', 'name' => 'MotionVars', 'caption' => 'Melder (mehrfach)', 'multiple' => true]
+            ]],
+            ['type' => 'ExpansionPanel', 'caption' => 'Lichter', 'items' => [
+                [
+                    'type' => 'List',
+                    'name' => 'Lights',
+                    'caption' => 'Akteure',
+                    'columns' => [
+                        [
+                            'caption' => 'Typ',
+                            'name'    => 'type',
+                            'width'   => '120px',
+                            'add'     => 'dimmer',
+                            'edit'    => [
+                                'type'    => 'Select',
+                                'options' => [
+                                    ['caption' => 'Dimmer',  'value' => 'dimmer'],
+                                    ['caption' => 'Schalter','value' => 'switch']
                                 ]
                             ]
                         ],
-                        'add' => true, 'delete' => true
-                    ]
-                ]],
-                ['type' => 'ExpansionPanel', 'caption' => 'Stati (Inhibits)', 'items' => [
-                    ['type' => 'SelectVariable', 'name' => 'InhibitVars', 'caption' => 'Raum-Stati', 'multiple' => true],
-                    ['type' => 'SelectVariable', 'name' => 'GlobalInhibits', 'caption' => 'Globale Stati', 'multiple' => true]
-                ]],
-                ['type' => 'ExpansionPanel', 'caption' => 'Lux (optional)', 'items' => [
-                    ['type' => 'SelectVariable', 'name' => 'LuxVar', 'caption' => 'Lux-Variable'],
-                    ['type' => 'NumberSpinner', 'name' => 'LuxMax', 'caption' => 'Lux max', 'minimum' => 0, 'maximum' => 100000]
-                ]],
-                ['type' => 'ExpansionPanel', 'caption' => 'Verhalten', 'items' => [
-                    ['type' => 'NumberSpinner', 'name' => 'TimeoutSec', 'caption' => 'Timeout Standard (s)', 'minimum' => 5, 'maximum' => 3600],
-                    ['type' => 'SelectVariable', 'name' => 'TimeoutVar', 'caption' => 'Timeout aus Variable (optional)'],
-                    ['type' => 'NumberSpinner', 'name' => 'DefaultDim', 'caption' => 'Default Dim (%)', 'minimum' => 1, 'maximum' => 100],
-                    ['type' => 'CheckBox', 'name' => 'ManualAutoOff', 'caption' => 'Manuelles Auto-Off aktiv']
-                ]]
-            ],
-            'actions' => [
-                ['type' => 'Button', 'caption' => 'Test: Auto-Off jetzt', 'onClick' => 'RML_AutoOff($id);']
-            ],
-            'status' => []
-        ]);
-    }
+                        [
+                            'caption' => 'Variable',
+                            'name'    => 'var',
+                            'width'   => '250px',
+                            'add'     => 0,                       // <-- wichtig
+                            'edit'    => ['type' => 'SelectVariable']
+                        ],
+                        [
+                            'caption' => 'SwitchVar (optional)',
+                            'name'    => 'switchVar',
+                            'width'   => '220px',
+                            'add'     => 0,                       // <-- wichtig
+                            'edit'    => ['type' => 'SelectVariable']
+                        ],
+                        [
+                            'caption' => 'Range',
+                            'name'    => 'range',
+                            'width'   => '120px',
+                            'add'     => '0..100',
+                            'edit'    => [
+                                'type'    => 'Select',
+                                'options' => [
+                                    ['caption' => '0..100', 'value' => '0..100'],
+                                    ['caption' => '0..255', 'value' => '0..255']
+                                ]
+                            ]
+                        ]
+                    ],
+                    'add'    => true,
+                    'delete' => true
+                ]
+            ]],
+            ['type' => 'ExpansionPanel', 'caption' => 'Stati (Inhibits)', 'items' => [
+                ['type' => 'SelectVariable', 'name' => 'InhibitVars',   'caption' => 'Raum-Stati',    'multiple' => true],
+                ['type' => 'SelectVariable', 'name' => 'GlobalInhibits','caption' => 'Globale Stati', 'multiple' => true]
+            ]],
+            ['type' => 'ExpansionPanel', 'caption' => 'Lux (optional)', 'items' => [
+                ['type' => 'SelectVariable', 'name' => 'LuxVar', 'caption' => 'Lux-Variable'],
+                ['type' => 'NumberSpinner',  'name' => 'LuxMax', 'caption' => 'Lux max', 'minimum' => 0, 'maximum' => 100000]
+            ]],
+            ['type' => 'ExpansionPanel', 'caption' => 'Verhalten', 'items' => [
+                ['type' => 'NumberSpinner', 'name' => 'TimeoutSec', 'caption' => 'Timeout Standard (s)', 'minimum' => 5, 'maximum' => 3600],
+                ['type' => 'SelectVariable','name' => 'TimeoutVar', 'caption' => 'Timeout aus Variable (optional)'],
+                ['type' => 'NumberSpinner', 'name' => 'DefaultDim', 'caption' => 'Default Dim (%)', 'minimum' => 1, 'maximum' => 100],
+                ['type' => 'CheckBox',      'name' => 'ManualAutoOff', 'caption' => 'Manuelles Auto-Off aktiv']
+            ]]
+        ],
+        'actions' => [
+            ['type' => 'Button', 'caption' => 'Test: Auto-Off jetzt', 'onClick' => 'RML_AutoOff($id);']
+        ],
+        'status' => []
+    ]);
+}
 
     // === Timer-Callback ===
     public function AutoOff(): void
