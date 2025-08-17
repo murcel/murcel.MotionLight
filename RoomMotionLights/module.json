@@ -1,9 +1,12 @@
 {
-  "id": "{6F4B5F86-71FD-45D2-A7BB-174F0A263BF4}",
-  "name": "RoomMotionLights",
+  "id": "{7F4B54D3-5F73-4E2A-8C9A-8A18C842D5C1}",
+  "name": "Room Motion Lights",
   "type": 3,
   "vendor": "murcel",
-  "aliases": ["Motion Light (Room)"],
+  "aliases": [
+    "Raum-Bewegungslicht",
+    "RoomMotionLights"
+  ],
   "parentRequirements": [],
   "childRequirements": [],
   "implemented": [],
