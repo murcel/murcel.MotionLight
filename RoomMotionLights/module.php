@@ -331,7 +331,6 @@ class RoomMotionLights extends IPSModule
     }
 
     /* ================= Debug-Actions (Buttons im Formular) ================= */
-    public function DebugStoreScene(): void
 public function DebugStoreScene(int $InstanceID): void
 {
     $this->writeAttr('SceneRestore', $this->captureCurrentScene());
