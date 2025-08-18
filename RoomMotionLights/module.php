@@ -20,7 +20,7 @@ class RoomMotionLights extends IPSModule
         $this->RegisterPropertyBoolean('ManualAutoOff', true);
         $this->RegisterPropertyInteger('LuxVar', 0);
         $this->RegisterPropertyInteger('LuxMax', 50);
-        $this->RegisterPropertyBoolean('RestoreOnNextProp', true); // Startzustand (Property) -> wird auf Var gespiegelt
+        $this->RegisterPropertyBoolean('RestoreOnNextProp', true); // Startzustand
 
         // ---- Laufzeit-Settings (für View/WebFront) ----
         $this->ensureProfiles();
@@ -40,7 +40,6 @@ class RoomMotionLights extends IPSModule
         $this->RegisterVariableBoolean('Set_ManualAutoOff', 'Manuelles Auto-Off aktiv', '~Switch', 5);
         $this->EnableAction('Set_ManualAutoOff');
 
-        // Runtime-Variable für Restore (GUI/Automation)
         $this->RegisterVariableBoolean('RestoreOnNext', 'Szene bei nächster Bewegung wiederherstellen', '~Switch', 6);
         $this->EnableAction('RestoreOnNext');
 
@@ -90,7 +89,7 @@ class RoomMotionLights extends IPSModule
 
         $this->ensureProfiles();
 
-        // --- Properties -> Runtime-Variablen spiegeln (Modul-Dialog -> Instanzvariablen) ---
+        // --- Properties -> Runtime-Variablen spiegeln ---
         @SetValueInteger($this->GetIDForIdent('Set_TimeoutSec'),   max(5, (int)$this->ReadPropertyInteger('TimeoutSec')));
         @SetValueInteger($this->GetIDForIdent('Set_DefaultDim'),   max(1, min(100, (int)$this->ReadPropertyInteger('DefaultDim'))));
         @SetValueInteger($this->GetIDForIdent('Set_LuxMax'),       max(0, (int)$this->ReadPropertyInteger('LuxMax')));
@@ -127,8 +126,9 @@ class RoomMotionLights extends IPSModule
             if ($v  > 0 && @IPS_VariableExists($v))  { $this->RegisterMessage($v,  self::VM_UPDATE); $new[] = $v; }
             if ($sv > 0 && @IPS_VariableExists($sv)) { $this->RegisterMessage($sv, self::VM_UPDATE); $new[] = $sv; }
         }
-
         $this->setRegisteredIDs($new);
+
+        $this->dbg('ApplyChanges: registriert=' . json_encode($new));
     }
 
     /* ================= Formular ================= */
@@ -204,10 +204,13 @@ class RoomMotionLights extends IPSModule
     /* ================= Timer: Auto-Off ================= */
     public function AutoOff(): void
     {
+        $this->dbg('AutoOff: ausgelöst – Szene sichern=' . ($this->GetValue('RestoreOnNext') ? 'ja' : 'nein'));
+
         // Vor dem Ausschalten die aktuelle Szene sichern (optional)
         if ($this->GetValue('RestoreOnNext')) {
             $scene = $this->captureCurrentScene();
             $this->writeAttr('SceneRestore', $scene);
+            $this->dbg('AutoOff: SceneRestore gespeichert: ' . json_encode($scene));
         }
         $this->writeAttr('SceneLive', []); // leeren
 
@@ -228,7 +231,7 @@ class RoomMotionLights extends IPSModule
         $this->SetTimerInterval('CountdownTick', 0);
         @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
 
-        IPS_LogMessage('RML', 'AutoOff executed (Instance '.$this->InstanceID.')');
+        $this->dbg('AutoOff: alle Lichter aus, Timer & Countdown gestoppt');
     }
 
     /* ================= MessageSink ================= */
@@ -237,29 +240,41 @@ class RoomMotionLights extends IPSModule
         if ($Message !== self::VM_UPDATE) return;
 
         // interne Setzungen ignorieren
-        if ($this->getGuard()) return;
+        if ($this->getGuard()) {
+            $this->dbg('MessageSink: GUARD aktiv – Sender=' . $SenderID . ' ignoriert');
+            return;
+        }
 
         // 1) Bewegung?
         if (in_array($SenderID, $this->getMotionVars(), true)) {
-            if (!@GetValueBoolean($SenderID)) return;      // nur auf TRUE
+            $mv = (int)@GetValueBoolean($SenderID);
+            $this->dbg('MessageSink:MOTION Sender=' . $SenderID . ' value=' . ($mv ? 'TRUE' : 'FALSE'));
+
+            if (!$mv) return; // nur auf TRUE
 
             // Stati IMMER beachten
-            foreach ($this->getInhibitVars() as $vid)      { if (@GetValueBoolean($vid)) return; }
-            foreach ($this->getGlobalInhibits() as $vid)   { if (@GetValueBoolean($vid)) return; }
+            foreach ($this->getInhibitVars() as $vid) {
+                if (@GetValueBoolean($vid)) { $this->dbg('MessageSink:MOTION abgebrochen: Raum-Inhibit=' . $vid); return; }
+            }
+            foreach ($this->getGlobalInhibits() as $vid) {
+                if (@GetValueBoolean($vid)) { $this->dbg('MessageSink:MOTION abgebrochen: Global-Inhibit=' . $vid); return; }
+            }
 
-            // Override blockiert nur Auto-ON (Motion)
-            if ($this->GetValue('Override')) return;
+            // Override blockiert nur Auto-ON
+            if ($this->GetValue('Override')) { $this->dbg('MessageSink:MOTION abgebrochen: Override aktiv'); return; }
 
             // Lux-Grenze (optional)
             $luxVar = $this->ReadPropertyInteger('LuxVar');
             if ($luxVar > 0 && @IPS_VariableExists($luxVar)) {
                 $lux = @GetValue($luxVar);
-                if (is_numeric($lux) && $lux > $this->getSettingLuxMax()) return;
+                $this->dbg('MessageSink:MOTION Lux=' . (is_numeric($lux) ? (string)$lux : 'n/a') . ' Max=' . $this->getSettingLuxMax());
+                if (is_numeric($lux) && $lux > $this->getSettingLuxMax()) { $this->dbg('MessageSink:MOTION abgebrochen: Lux > Max'); return; }
             }
 
             // Wiederherstellen aus Szene?
             $rest = $this->readAttr('SceneRestore', []);
             if ($this->GetValue('RestoreOnNext') && is_array($rest) && count($rest) > 0) {
+                $this->dbg('MessageSink:MOTION -> Restore-Szene');
                 $this->setGuard(true);
                 foreach ($rest as $st) {
                     $actor = $this->findActorByVar((int)($st['var'] ?? 0));
@@ -276,81 +291,75 @@ class RoomMotionLights extends IPSModule
 
                 // Szene verbrauchen
                 $this->writeAttr('SceneRestore', []);
+                $this->dbg('MessageSink:MOTION -> Restore-Szene angewendet & gelöscht');
 
-                $this->armAutoOffTimer();
-                IPS_LogMessage('RML', 'Rearm by MOTION (restore) Instance '.$this->InstanceID);
+                // Auto-Off Timer setzen
+                $this->armAutoOffTimer('motion-restore');
                 return;
             }
 
             // Kein Restore: Memory / Default
             $targetDefault = $this->getSettingDefaultDim();
+            $this->dbg('MessageSink:MOTION -> Memory/Default, Default=' . $targetDefault);
 
             $this->setGuard(true);
             foreach ($this->getLights() as $a) {
                 $type = $a['type'] ?? '';
                 if ($type === 'switch') {
                     $mem = $this->getMemoryFor($a);
-                    $this->setSwitch((int)$a['var'], ($mem['on'] ?? true));
+                    $on = ($mem['on'] ?? true);
+                    $this->setSwitch((int)$a['var'], $on);
+                    $this->dbg('  switch var=' . (int)$a['var'] . ' on=' . ($on ? '1' : '0'));
                 } elseif ($type === 'dimmer') {
                     $mem = $this->getMemoryFor($a);
                     $pct = isset($mem['pct']) && $mem['pct'] > 0 ? (int)$mem['pct'] : $targetDefault;
                     $this->setDimmerPct($a, $pct);
+                    $this->dbg('  dimmer var=' . (int)$a['var'] . ' pct=' . $pct);
                 }
             }
             $this->setGuard(false);
 
             $this->writeAttr('SceneLive', $this->captureCurrentScene());
-            $this->armAutoOffTimer();
-            IPS_LogMessage('RML', 'Rearm by MOTION (normal) Instance '.$this->InstanceID);
+            $this->armAutoOffTimer('motion-default');
             return;
         }
 
         // 2) Manuelle Lichtänderungen → Memory + SceneLive + optional Auto-Off
-        //    NEU: Re-Arm nur bei OFF->ON (nicht bei reinen Dimänderungen)
-        $sceneBefore = $this->readAttr('SceneLive', []);
-        $wasOn = $this->sceneHasAnyOn($sceneBefore);
-        $sawOnAfterChange = false;
-
         foreach ($this->getLights() as $a) {
             $v  = (int)($a['var'] ?? 0);
             $sv = (int)($a['switchVar'] ?? 0);
 
-            // Dimmer-/Switch-Änderung am Hauptwert
+            // Dimmer-/Switch-Änderung
             if ($SenderID === $v) {
                 $type = $a['type'] ?? '';
                 if ($type === 'switch') {
                     $on = (bool)@GetValueBoolean($v);
+                    $this->dbg('MessageSink:MANUAL switch var=' . $v . ' on=' . ($on ? '1' : '0'));
                     $this->updateMemorySwitch($a, $on);
                     $this->updateSceneLive();
-                    $sawOnAfterChange = $sawOnAfterChange || $on;
+                    if ($on && $this->getSettingManualAutoOff()) {
+                        $this->armAutoOffTimer('manual-switch-on');
+                    }
                 } elseif ($type === 'dimmer') {
                     $pct = $this->getDimmerPct($a);
                     $on  = $pct > 0;
+                    $this->dbg('MessageSink:MANUAL dimmer var=' . $v . ' pct=' . $pct . ' on=' . ($on ? '1' : '0'));
                     $this->updateMemoryDimmer($a, $pct, $on);
                     $this->updateSceneLive();
-                    $sawOnAfterChange = $sawOnAfterChange || $on;
+                    if ($on && $this->getSettingManualAutoOff()) {
+                        $this->armAutoOffTimer('manual-dimmer-on');
+                    }
                 }
             }
             // separate Ein/Aus-Variable
             if ($sv > 0 && $SenderID === $sv) {
                 $on = (bool)@GetValueBoolean($sv);
+                $this->dbg('MessageSink:MANUAL switchVar=' . $sv . ' on=' . ($on ? '1' : '0'));
                 $this->updateMemorySwitch($a, $on);
                 $this->updateSceneLive();
-                $sawOnAfterChange = $sawOnAfterChange || $on;
-            }
-        }
-
-        // Entscheidungslogik für Re-Arm bei manueller Änderung
-        if ($this->getSettingManualAutoOff()) {
-            $sceneAfter = $this->readAttr('SceneLive', []);
-            $isOn = $this->sceneHasAnyOn($sceneAfter);
-
-            if (!$wasOn && $isOn) {
-                $this->armAutoOffTimer();
-                IPS_LogMessage('RML', 'Rearm by MANUAL OFF->ON (Instance '.$this->InstanceID.')');
-            } else {
-                // Kein Re-Arm (nur Dimmen während bereits an)
-                IPS_LogMessage('RML', 'Manual change without OFF->ON, no re-arm (Instance '.$this->InstanceID.')');
+                if ($on && $this->getSettingManualAutoOff()) {
+                    $this->armAutoOffTimer('manual-switchVar-on');
+                }
             }
         }
     }
@@ -361,41 +370,46 @@ class RoomMotionLights extends IPSModule
         switch ($Ident) {
             case 'Override':
                 SetValueBoolean($this->GetIDForIdent('Override'), (bool)$Value);
+                $this->dbg('RequestAction: Override=' . ((bool)$Value ? 'TRUE' : 'FALSE'));
                 if ($Value) {
                     // laufenden Auto-Off abbrechen
                     $this->SetTimerInterval('AutoOff', 0);
                     $this->SetTimerInterval('CountdownTick', 0);
                     $this->WriteAttributeInteger('AutoOffUntil', 0);
                     @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
-                    IPS_LogMessage('RML', 'Override enabled -> timers cancelled (Instance '.$this->InstanceID.')');
+                    $this->dbg('RequestAction: Override aktiv – AutoOff & Countdown gestoppt');
                 }
                 break;
 
             case 'Set_TimeoutSec':
                 $val = max(5, min(3600, (int)$Value));
                 SetValueInteger($this->GetIDForIdent('Set_TimeoutSec'), $val);
+                $this->dbg('RequestAction: Set_TimeoutSec=' . $val);
                 if ($this->GetTimerInterval('AutoOff') > 0) {
-                    $this->armAutoOffTimer();
-                    IPS_LogMessage('RML', 'Rearm by SET_TIMEOUT ('.$val.'s) Instance '.$this->InstanceID);
+                    $this->armAutoOffTimer('set-timeout');
                 }
                 break;
 
             case 'Set_DefaultDim':
                 $val = max(1, min(100, (int)$Value));
                 SetValueInteger($this->GetIDForIdent('Set_DefaultDim'), $val);
+                $this->dbg('RequestAction: Set_DefaultDim=' . $val);
                 break;
 
             case 'Set_LuxMax':
-                SetValueInteger($this->GetIDForIdent('Set_LuxMax'), max(0, (int)$Value));
+                $val = max(0, (int)$Value);
+                SetValueInteger($this->GetIDForIdent('Set_LuxMax'), $val);
+                $this->dbg('RequestAction: Set_LuxMax=' . $val);
                 break;
 
             case 'Set_ManualAutoOff':
                 SetValueBoolean($this->GetIDForIdent('Set_ManualAutoOff'), (bool)$Value);
-                IPS_LogMessage('RML', 'ManualAutoOff='.((bool)$Value?'true':'false').' Instance '.$this->InstanceID);
+                $this->dbg('RequestAction: Set_ManualAutoOff=' . ((bool)$Value ? 'TRUE' : 'FALSE'));
                 break;
 
             case 'RestoreOnNext':
                 SetValueBoolean($this->GetIDForIdent('RestoreOnNext'), (bool)$Value);
+                $this->dbg('RequestAction: RestoreOnNext=' . ((bool)$Value ? 'TRUE' : 'FALSE'));
                 break;
         }
     }
@@ -403,19 +417,21 @@ class RoomMotionLights extends IPSModule
     /* ================= Debug-Actions (Buttons im Formular) ================= */
     public function DebugStoreScene(): void
     {
-        $this->writeAttr('SceneRestore', $this->captureCurrentScene());
-        IPS_LogMessage('RML', 'DebugStoreScene executed (Instance '.$this->InstanceID.')');
+        $scene = $this->captureCurrentScene();
+        $this->writeAttr('SceneRestore', $scene);
+        $this->dbg('DebugStoreScene: SceneRestore=' . json_encode($scene));
     }
     public function DebugClearScene(): void
     {
         $this->writeAttr('SceneRestore', []);
-        IPS_LogMessage('RML', 'DebugClearScene executed (Instance '.$this->InstanceID.')');
+        $this->dbg('DebugClearScene: SceneRestore geleert');
     }
     public function DebugRestoreScene(): void
     {
         $rest = $this->readAttr('SceneRestore', []);
-        if (!is_array($rest) || empty($rest)) return;
+        if (!is_array($rest) || empty($rest)) { $this->dbg('DebugRestoreScene: keine Szene gespeichert'); return; }
 
+        $this->dbg('DebugRestoreScene: stelle wieder her: ' . json_encode($rest));
         $this->setGuard(true);
         foreach ($rest as $st) {
             $actor = $this->findActorByVar((int)($st['var'] ?? 0));
@@ -429,7 +445,6 @@ class RoomMotionLights extends IPSModule
             }
         }
         $this->setGuard(false);
-        IPS_LogMessage('RML', 'DebugRestoreScene executed (Instance '.$this->InstanceID.')');
     }
 
     /* ================= Settings lesen ================= */
@@ -476,10 +491,10 @@ class RoomMotionLights extends IPSModule
         }
     }
 
-    private function armAutoOffTimer(): void
+    private function armAutoOffTimer(string $reason = 'generic'): void
     {
         $timeout = $this->getSettingTimeoutSec();
-        $until = time() + $timeout;
+        $until   = time() + $timeout;
 
         $this->WriteAttributeInteger('AutoOffUntil', $until);
 
@@ -490,9 +505,10 @@ class RoomMotionLights extends IPSModule
         $this->SetTimerInterval('CountdownTick', 1000);
 
         // Sofort initiale Anzeige setzen
-        @SetValueInteger($this->GetIDForIdent('CountdownSec'), max(0, $until - time()));
+        $remain = max(0, $until - time());
+        @SetValueInteger($this->GetIDForIdent('CountdownSec'), $remain);
 
-        IPS_LogMessage('RML', 'armAutoOffTimer() -> timeout='.$timeout.'s; until='.$until.' (Instance '.$this->InstanceID.')');
+        $this->dbg('armAutoOffTimer: reason=' . $reason . ' timeout=' . $timeout . 's until=' . date('H:i:s', $until));
     }
 
     public function CountdownTick(): void
@@ -502,6 +518,7 @@ class RoomMotionLights extends IPSModule
             // Keine laufende Auto-Off-Phase
             $this->SetTimerInterval('CountdownTick', 0);
             @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
+            $this->dbg('CountdownTick: kein aktiver Countdown → Tick gestoppt');
             return;
         }
 
@@ -510,10 +527,15 @@ class RoomMotionLights extends IPSModule
             // Countdown abgelaufen -> Anzeige auf 0 und Tick stoppen
             @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
             $this->SetTimerInterval('CountdownTick', 0);
+            $this->dbg('CountdownTick: abgelaufen → Anzeige=0, Tick gestoppt (AutoOff erledigt den Rest)');
             return;
         }
 
         @SetValueInteger($this->GetIDForIdent('CountdownSec'), $remain);
+        // nicht zu „chatty“ loggen – nur größere Sprünge aufzeichnen
+        if ($remain % 10 === 0) {
+            $this->dbg('CountdownTick: remain=' . $remain . 's');
+        }
     }
 
     /* ================= Lists & Lights ================= */
@@ -632,6 +654,7 @@ class RoomMotionLights extends IPSModule
         if (!isset($cur['pct'])) $cur['pct'] = $on ? 100 : 0;
         $m[(string)$vid] = $cur;
         $this->setMemory($m);
+        $this->dbg('updateMemorySwitch: var=' . $vid . ' on=' . ($on ? '1' : '0'));
     }
     private function updateMemoryDimmer(array $actor, int $pct, bool $on): void
     {
@@ -644,6 +667,7 @@ class RoomMotionLights extends IPSModule
         $cur['on'] = (bool)$on;
         $m[(string)$vid] = $cur;
         $this->setMemory($m);
+        $this->dbg('updateMemoryDimmer: var=' . $vid . ' pct=' . $pct . ' on=' . ($on ? '1' : '0'));
     }
 
     /* ================= Scene (Live/Restore) ================= */
@@ -667,18 +691,9 @@ class RoomMotionLights extends IPSModule
     }
     private function updateSceneLive(): void
     {
-        $this->writeAttr('SceneLive', $this->captureCurrentScene());
-    }
-
-    // --- NEU: Helfer, ob eine Szene irgendein „an“ enthält
-    private function sceneHasAnyOn(array $scene): bool
-    {
-        if (!is_array($scene)) return false;
-        foreach ($scene as $s) {
-            if (isset($s['on']) && $s['on']) return true;
-            if (($s['type'] ?? '') === 'dimmer' && isset($s['pct']) && (int)$s['pct'] > 0) return true;
-        }
-        return false;
+        $scene = $this->captureCurrentScene();
+        $this->writeAttr('SceneLive', $scene);
+        $this->dbg('updateSceneLive: ' . json_encode($scene));
     }
 
     /* ================= Guards & Attr helpers ================= */
@@ -712,5 +727,14 @@ class RoomMotionLights extends IPSModule
     {
         $ids = array_values(array_unique(array_map('intval', $ids)));
         $this->WriteAttributeString('RegisteredIDs', json_encode($ids));
+    }
+
+    /* ================= Debug helper ================= */
+    private function dbg(string $msg): void
+    {
+        // Alles im Instanz-Debug anzeigen:
+        $this->SendDebug('RML', $msg, 0);
+        // Optional zusätzlich ins System-Log:
+        // IPS_LogMessage('RML', $msg);
     }
 }
