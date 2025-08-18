@@ -3,14 +3,7 @@
   "name": "RoomMotionLights",
   "type": 3,
   "vendor": "murcel",
-  "aliases": [
-    "RoomMotionLights",
-    "Motion Light",
-    "MotionLight",
-    "Bewegungslicht",
-    "Raumlicht Bewegung",
-    "Automatiklicht"
-  ],
+  "aliases": ["Raum-Bewegungslicht", "RoomMotionLights"],
   "parentRequirements": [],
   "childRequirements": [],
   "implemented": [],

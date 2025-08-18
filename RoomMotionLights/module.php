@@ -137,66 +137,66 @@ $this->RegisterAttributeInteger('AutoOffUntil', 0);
     {
         return json_encode([
             'elements' => [
-                ['type' => 'ExpansionPanel', 'caption' => 'Bewegungsmelder', 'items' => [[
-                    'type' => 'List', 'name' => 'MotionVars', 'caption' => 'Melder',
+                ['type' => 'ExpansionPanel', 'caption' => $this->Translate('Bewegungsmelder'), 'items' => [[
+                    'type' => 'List', 'name' => 'MotionVars', 'caption' => $this->Translate('Melder'),
                     'columns' => [[
-                        'caption' => 'Variable', 'name' => 'var', 'width' => '320px',
+                        'caption' => $this->Translate('Variable'), 'name' => 'var', 'width' => '320px',
                         'add' => 0, 'edit' => ['type' => 'SelectVariable']
                     ]],
                     'add' => true, 'delete' => true
                 ]]],
-                ['type' => 'ExpansionPanel', 'caption' => 'Lichter', 'items' => [[
-                    'type' => 'List', 'name' => 'Lights', 'caption' => 'Akteure',
+                ['type' => 'ExpansionPanel', 'caption' => $this->Translate('Lichter'), 'items' => [[
+                    'type' => 'List', 'name' => 'Lights', 'caption' => $this->Translate('Akteure'),
                     'columns' => [
-                        ['caption' => 'Typ', 'name' => 'type', 'width' => '120px', 'add' => 'dimmer',
+                        ['caption' => $this->Translate('Typ'), 'name' => 'type', 'width' => '120px', 'add' => 'dimmer',
                          'edit' => ['type' => 'Select', 'options' => [
-                             ['caption' => 'Dimmer',  'value' => 'dimmer'],
-                             ['caption' => 'Schalter','value' => 'switch']
+                             ['caption' => $this->Translate('Dimmer'),  'value' => 'dimmer'],
+                             ['caption' => $this->Translate('Schalter'),'value' => 'switch']
                          ]]],
-                        ['caption' => 'Helligkeitsvariable', 'name' => 'var', 'width' => '260px', 'add' => 0,
+                        ['caption' => $this->Translate('Helligkeitsvariable'), 'name' => 'var', 'width' => '260px', 'add' => 0,
                          'edit' => ['type' => 'SelectVariable']],
-                        ['caption' => 'Ein/Aus/Status-Variable (optional)', 'name' => 'switchVar', 'width' => '260px', 'add' => 0,
+                        ['caption' => $this->Translate('Ein/Aus/Status-Variable (optional)'), 'name' => 'switchVar', 'width' => '260px', 'add' => 0,
                          'edit' => ['type' => 'SelectVariable']],
-                        ['caption' => 'Range', 'name' => 'range', 'width' => '160px', 'add' => 'auto',
+                        ['caption' => $this->Translate('Range'), 'name' => 'range', 'width' => '160px', 'add' => 'auto',
                          'edit' => ['type' => 'Select', 'options' => [
-                             ['caption' => 'auto (aus Profil)', 'value' => 'auto'],
-                             ['caption' => '0..100',            'value' => '0..100'],
-                             ['caption' => '0..255',            'value' => '0..255']
+                             ['caption' => $this->Translate('auto (aus Profil)'), 'value' => 'auto'],
+                             ['caption' => $this->Translate('0..100'),            'value' => '0..100'],
+                             ['caption' => $this->Translate('0..255'),            'value' => '0..255']
                          ]]]
                     ],
                     'add' => true, 'delete' => true
                 ]]],
-                ['type' => 'ExpansionPanel', 'caption' => 'Stati (Inhibits)', 'items' => [
-                    ['type' => 'List', 'name' => 'InhibitVars', 'caption' => 'Raum-Stati',
+                ['type' => 'ExpansionPanel', 'caption' => $this->Translate('Stati (Inhibits)'), 'items' => [
+                    ['type' => 'List', 'name' => 'InhibitVars', 'caption' => $this->Translate('Raum-Stati'),
                      'columns' => [[
-                         'caption' => 'Variable', 'name' => 'var', 'width' => '320px',
+                         'caption' => $this->Translate('Variable'), 'name' => 'var', 'width' => '320px',
                          'add' => 0, 'edit' => ['type' => 'SelectVariable']
                      ]], 'add' => true, 'delete' => true],
-                    ['type' => 'List', 'name' => 'GlobalInhibits', 'caption' => 'Globale Stati',
+                    ['type' => 'List', 'name' => 'GlobalInhibits', 'caption' => $this->Translate('Globale Stati'),
                      'columns' => [[
-                         'caption' => 'Variable', 'name' => 'var', 'width' => '320px',
+                         'caption' => $this->Translate('Variable'), 'name' => 'var', 'width' => '320px',
                          'add' => 0, 'edit' => ['type' => 'SelectVariable']
                      ]], 'add' => true, 'delete' => true]
                 ]],
-                ['type' => 'ExpansionPanel', 'caption' => 'Lux (optional)', 'items' => [
-                    ['type' => 'SelectVariable', 'name' => 'LuxVar', 'caption' => 'Lux-Variable'],
-                    ['type' => 'NumberSpinner',  'name' => 'LuxMax', 'caption' => 'Lux-Maximalwert', 'minimum' => 0, 'maximum' => 100000],
-                    ['type' => 'Label', 'caption' => 'Lux max, Timeout, Default Dim & Auto-Off sind zusätzlich als Instanzvariablen steuerbar.']
+                ['type' => 'ExpansionPanel', 'caption' => $this->Translate('Lux (optional)'), 'items' => [
+                    ['type' => 'SelectVariable', 'name' => 'LuxVar', 'caption' => $this->Translate('Lux-Variable')],
+                    ['type' => 'NumberSpinner',  'name' => 'LuxMax', 'caption' => $this->Translate('Lux-Maximalwert'), 'minimum' => 0, 'maximum' => 100000],
+                    ['type' => 'Label', 'caption' => $this->Translate('Lux max, Timeout, Default Dim & Auto-Off sind zusätzlich als Instanzvariablen steuerbar.')]
                 ]],
                 // Einstellungen direkt im Modul-Dialog (Properties)
-                ['type' => 'ExpansionPanel', 'caption' => 'Einstellungen', 'items' => [
-                    ['type' => 'NumberSpinner', 'name' => 'TimeoutSec',      'caption' => 'Timeout (Sekunden)', 'minimum' => 5, 'maximum' => 3600],
-                    ['type' => 'NumberSpinner', 'name' => 'DefaultDim',      'caption' => 'Default Dim (%)',    'minimum' => 1, 'maximum' => 100],
-                    ['type' => 'CheckBox',      'name' => 'ManualAutoOff',   'caption' => 'Manuelles Auto-Off aktiv'],
-                    ['type' => 'CheckBox',      'name' => 'RestoreOnNextProp','caption' => 'Szene bei nächster Bewegung wiederherstellen (Startzustand)']
+                ['type' => 'ExpansionPanel', 'caption' => $this->Translate('Einstellungen'), 'items' => [
+                    ['type' => 'NumberSpinner', 'name' => 'TimeoutSec',      'caption' => $this->Translate('Timeout (Sekunden)'), 'minimum' => 5, 'maximum' => 3600],
+                    ['type' => 'NumberSpinner', 'name' => 'DefaultDim',      'caption' => $this->Translate('Default Dim (%)'),    'minimum' => 1, 'maximum' => 100],
+                    ['type' => 'CheckBox',      'name' => 'ManualAutoOff',   'caption' => $this->Translate('Manuelles Auto-Off aktiv')],
+                    ['type' => 'CheckBox',      'name' => 'RestoreOnNextProp','caption' => $this->Translate('Szene bei nächster Bewegung wiederherstellen (Startzustand)')]
                 ]]
             ],
             'actions' => [
-                ['type' => 'Label', 'caption' => '--- Debug ---'],
-                ['type' => 'Button', 'caption' => 'Szene jetzt sichern (Live → Restore)', 'onClick' => 'RML_DebugStoreScene($id);'],
-                ['type' => 'Button', 'caption' => 'Szene wiederherstellen',                'onClick' => 'RML_DebugRestoreScene($id);'],
-                ['type' => 'Button', 'caption' => 'Szene-Backup löschen',                  'onClick' => 'RML_DebugClearScene($id);'],
-                ['type' => 'Button', 'caption' => 'Test: Auto-Off jetzt',                  'onClick' => 'RML_AutoOff($id);']
+                ['type' => 'Label', 'caption' => $this->Translate('--- Debug ---')],
+                ['type' => 'Button', 'caption' => $this->Translate('Szene jetzt sichern (Live → Restore)'), 'onClick' => 'RML_DebugStoreScene($id);'],
+                ['type' => 'Button', 'caption' => $this->Translate('Szene wiederherstellen'),                'onClick' => 'RML_DebugRestoreScene($id);'],
+                ['type' => 'Button', 'caption' => $this->Translate('Szene-Backup löschen'),                  'onClick' => 'RML_DebugClearScene($id);'],
+                ['type' => 'Button', 'caption' => $this->Translate('Test: Auto-Off jetzt'),                  'onClick' => 'RML_AutoOff($id);']
             ],
             'status' => []
         ]);

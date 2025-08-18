@@ -1,0 +1,10 @@
+name: Validate
+on: [push, pull_request]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: php -l RoomMotionLights/module.php
+      - run: jq . library.json
+      - run: jq . RoomMotionLights/module.json

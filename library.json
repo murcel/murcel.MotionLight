@@ -4,7 +4,8 @@
   "name": "MotionLight",
   "url": "https://github.com/murcel/murcel.MotionLight.git",
   "compatibility": { "version": "7.0" },
-  "version": "0.1.3",
+  "version": "0.2.0",
   "build": 1,
-  "date": 0
+  "date": 20250818,
+  "license": "MIT"
 }
