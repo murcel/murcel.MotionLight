@@ -60,7 +60,10 @@ class RoomMotionLights extends IPSModule
         $this->RegisterAttributeString('SceneRestore',  '[]');      // gespeicherte Szene
         $this->RegisterAttributeBoolean('GuardInternal', false);    // interne Setzungen ignorieren
     }
-
+public function DebugPing(): void
+{
+    $this->dbg('DebugPing: SendDebug/Log funktioniert.');
+}
     // ===== Öffentliche Komfort-Wrapper (RML_* werden generiert) =====
     public function SetTimeoutSec(int $seconds): void
     {
@@ -195,7 +198,8 @@ class RoomMotionLights extends IPSModule
                 ['type' => 'Button', 'caption' => $this->Translate('Szene jetzt sichern (Live → Restore)'), 'onClick' => 'RML_DebugStoreScene($id);'],
                 ['type' => 'Button', 'caption' => $this->Translate('Szene wiederherstellen'),                'onClick' => 'RML_DebugRestoreScene($id);'],
                 ['type' => 'Button', 'caption' => $this->Translate('Szene-Backup löschen'),                  'onClick' => 'RML_DebugClearScene($id);'],
-                ['type' => 'Button', 'caption' => $this->Translate('Test: Auto-Off jetzt'),                  'onClick' => 'RML_AutoOff($id);']
+                ['type' => 'Button', 'caption' => $this->Translate('Test: Auto-Off jetzt'),                  'onClick' => 'RML_AutoOff($id);'],
+                ['type' => 'Button', 'caption' => $this->Translate('Debug: Testmeldung'), 'onClick' => 'RML_DebugPing($id);']
             ],
             'status' => []
         ]);
@@ -735,6 +739,6 @@ class RoomMotionLights extends IPSModule
         // Alles im Instanz-Debug anzeigen:
         $this->SendDebug('RML', $msg, 0);
         // Optional zusätzlich ins System-Log:
-        // IPS_LogMessage('RML', $msg);
+        IPS_LogMessage('RML', $msg);
     }
 }
