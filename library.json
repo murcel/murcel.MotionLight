@@ -1,9 +1,9 @@
 {
   "id": "{041AA1CC-45F4-47AE-BC49-E6603155F602}",
   "author": "murcel",
-  "compatibility": { "version": "7.0" },
   "name": "MotionLight",
-  "url": "https://github.com/murcel/murcel.MotionLight.git",
+  "url": "https://github.com/murcel/murcel.MotionLight",
+  "compatibility": { "version": "7.0" },
   "version": "0.2.0",
   "build": 1,
   "date": 20250818
