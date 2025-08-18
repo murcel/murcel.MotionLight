@@ -20,7 +20,7 @@ class RoomMotionLights extends IPSModule
         $this->RegisterPropertyBoolean('ManualAutoOff', true);
         $this->RegisterPropertyInteger('LuxVar', 0);
         $this->RegisterPropertyInteger('LuxMax', 50);
-        $this->RegisterPropertyBoolean('RestoreOnNext', true);    // NEU: als Property im Modul-Dialog
+        $this->RegisterPropertyBoolean('RestoreOnNextProp', true); // <<< umbenannte Property
 
         // ---- Laufzeit-Settings (für View/WebFront) ----
         $this->ensureProfiles();
@@ -40,7 +40,8 @@ class RoomMotionLights extends IPSModule
         $this->RegisterVariableBoolean('Set_ManualAutoOff', 'Manuelles Auto-Off aktiv', '~Switch', 5);
         $this->EnableAction('Set_ManualAutoOff');
 
-        $this->RegisterVariableBoolean('RestoreOnNext',   'Szene bei nächster Bewegung wiederherstellen', '~Switch', 6);
+        // Runtime-Variable (für WebFront/View) bleibt "RestoreOnNext"
+        $this->RegisterVariableBoolean('RestoreOnNext', 'Szene bei nächster Bewegung wiederherstellen', '~Switch', 6);
         $this->EnableAction('RestoreOnNext');
 
         // ---- Timer ----
@@ -87,7 +88,8 @@ class RoomMotionLights extends IPSModule
         @SetValueInteger($this->GetIDForIdent('Set_DefaultDim'),   max(1, min(100, (int)$this->ReadPropertyInteger('DefaultDim'))));
         @SetValueInteger($this->GetIDForIdent('Set_LuxMax'),       max(0, (int)$this->ReadPropertyInteger('LuxMax')));
         @SetValueBoolean($this->GetIDForIdent('Set_ManualAutoOff'), (bool)$this->ReadPropertyBoolean('ManualAutoOff'));
-        @SetValueBoolean($this->GetIDForIdent('RestoreOnNext'),     (bool)$this->ReadPropertyBoolean('RestoreOnNext'));
+        // Wichtig: Property "RestoreOnNextProp" -> Variable "RestoreOnNext"
+        @SetValueBoolean($this->GetIDForIdent('RestoreOnNext'),     (bool)$this->ReadPropertyBoolean('RestoreOnNextProp'));
 
         // Vorherige Registrierungen lösen
         $prev = $this->getRegisteredIDs();
@@ -174,12 +176,12 @@ class RoomMotionLights extends IPSModule
                     ['type' => 'NumberSpinner',  'name' => 'LuxMax', 'caption' => 'Lux-Maximalwert', 'minimum' => 0, 'maximum' => 100000],
                     ['type' => 'Label', 'caption' => 'Lux max, Timeout, Default Dim & Auto-Off sind zusätzlich als Instanzvariablen steuerbar.']
                 ]],
-                // NEU: Einstellungen direkt im Modul-Dialog
+                // Einstellungen direkt im Modul-Dialog (Properties)
                 ['type' => 'ExpansionPanel', 'caption' => 'Einstellungen', 'items' => [
-                    ['type' => 'NumberSpinner', 'name' => 'TimeoutSec',   'caption' => 'Timeout (Sekunden)', 'minimum' => 5, 'maximum' => 3600],
-                    ['type' => 'NumberSpinner', 'name' => 'DefaultDim',   'caption' => 'Default Dim (%)',    'minimum' => 1, 'maximum' => 100],
-                    ['type' => 'CheckBox',      'name' => 'ManualAutoOff','caption' => 'Manuelles Auto-Off aktiv'],
-                    ['type' => 'CheckBox',      'name' => 'RestoreOnNext','caption' => 'Szene bei nächster Bewegung wiederherstellen (Startzustand)']
+                    ['type' => 'NumberSpinner', 'name' => 'TimeoutSec',      'caption' => 'Timeout (Sekunden)', 'minimum' => 5, 'maximum' => 3600],
+                    ['type' => 'NumberSpinner', 'name' => 'DefaultDim',      'caption' => 'Default Dim (%)',    'minimum' => 1, 'maximum' => 100],
+                    ['type' => 'CheckBox',      'name' => 'ManualAutoOff',   'caption' => 'Manuelles Auto-Off aktiv'],
+                    ['type' => 'CheckBox',      'name' => 'RestoreOnNextProp','caption' => 'Szene bei nächster Bewegung wiederherstellen (Startzustand)']
                 ]]
             ],
             'actions' => [
