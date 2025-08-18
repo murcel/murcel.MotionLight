@@ -47,6 +47,13 @@ class RoomMotionLights extends IPSModule
         // ---- Timer ----
         $this->RegisterTimer('AutoOff', 0, 'RML_AutoOff($_IPS[\'TARGET\']);');
 
+        // Debug: Restzeit in Sekunden anzeigen
+$this->RegisterVariableInteger('CountdownSec', 'Auto-Off Restzeit (s)', 'RML.TimeoutSec', 7);
+// Sekundentick für die Anzeige (läuft nur, wenn Auto-Off aktiv ist)
+$this->RegisterTimer('CountdownTick', 0, 'RML_CountdownTick($_IPS[\'TARGET\']);');
+// Endzeitpunkt des aktuellen Auto-Off (Unix-Timestamp)
+$this->RegisterAttributeInteger('AutoOffUntil', 0);
+
         // ---- Attribute (intern) ----
         $this->RegisterAttributeString('RegisteredIDs', '[]');      // für MessageSink
         $this->RegisterAttributeString('MemMap',        '{}');      // pro Lampe: {var:{type:'dimmer|switch', pct:int, on:bool}}
@@ -217,6 +224,10 @@ class RoomMotionLights extends IPSModule
         $this->setGuard(false);
 
         $this->SetTimerInterval('AutoOff', 0);
+        // Debug-Anzeige & Marker zurücksetzen
+$this->WriteAttributeInteger('AutoOffUntil', 0);
+$this->SetTimerInterval('CountdownTick', 0);
+@SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
     }
 
     /* ================= MessageSink ================= */
@@ -329,8 +340,15 @@ class RoomMotionLights extends IPSModule
     {
         switch ($Ident) {
             case 'Override':
-                SetValueBoolean($this->GetIDForIdent('Override'), (bool)$Value);
-                break;
+    SetValueBoolean($this->GetIDForIdent('Override'), (bool)$Value);
+    if ($Value) {
+        // laufenden Auto-Off abbrechen
+        $this->SetTimerInterval('AutoOff', 0);
+        $this->SetTimerInterval('CountdownTick', 0);
+        $this->WriteAttributeInteger('AutoOffUntil', 0);
+        @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
+    }
+    break;
 
             case 'Set_TimeoutSec':
                 $val = max(5, min(3600, (int)$Value));
@@ -429,11 +447,42 @@ class RoomMotionLights extends IPSModule
             IPS_SetVariableProfileValues('RML.LuxMax', 0, 100000, 1);
         }
     }
-    private function armAutoOffTimer(): void
-    {
-        $timeout = $this->getSettingTimeoutSec();
-        $this->SetTimerInterval('AutoOff', $timeout * 1000);
+private function armAutoOffTimer(): void
+{
+    $timeout = $this->getSettingTimeoutSec();
+    $until = time() + $timeout;
+
+    $this->WriteAttributeInteger('AutoOffUntil', $until);
+
+    // Auto-Off (ms)
+    $this->SetTimerInterval('AutoOff', $timeout * 1000);
+
+    // Sekundentick für visuelle Anzeige starten
+    $this->SetTimerInterval('CountdownTick', 1000);
+
+    // Sofort initiale Anzeige setzen
+    @SetValueInteger($this->GetIDForIdent('CountdownSec'), max(0, $until - time()));
+}
+public function CountdownTick(): void
+{
+    $until = (int)$this->ReadAttributeInteger('AutoOffUntil');
+    if ($until <= 0) {
+        // Keine laufende Auto-Off-Phase
+        $this->SetTimerInterval('CountdownTick', 0);
+        @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
+        return;
     }
+
+    $remain = $until - time();
+    if ($remain <= 0) {
+        // Countdown abgelaufen -> Anzeige auf 0 und Tick stoppen
+        @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
+        $this->SetTimerInterval('CountdownTick', 0);
+        return;
+    }
+
+    @SetValueInteger($this->GetIDForIdent('CountdownSec'), $remain);
+}
 
     /* ================= Lists & Lights ================= */
     private function getVarListFromProperty(string $propName): array
