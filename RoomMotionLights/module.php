@@ -114,6 +114,7 @@ class RoomMotionLights extends IPSModule
         foreach ($this->getMotionVars() as $vid) {
             $this->RegisterMessage($vid, self::VM_UPDATE);
             $new[] = $vid;
+            IPS_LogMessage('RML', 'Rearm by MOTION in Instance '.$this->InstanceID.' at '.date('H:i:s'));
         }
         // Inhibits
         foreach ($this->getInhibitVars() as $vid) {
@@ -288,6 +289,7 @@ class RoomMotionLights extends IPSModule
                 // Szene verbrauchen
                 $this->writeAttr('SceneRestore', []);
                 // Auto-Off Timer setzen
+                IPS_LogMessage('RML', 'Rearm by MANUAL change (var '.$SenderID.') in '.$this->InstanceID.' at '.date('H:i:s'));
                 $this->armAutoOffTimer();
                 return;
             }
@@ -312,6 +314,7 @@ class RoomMotionLights extends IPSModule
 
             // live Szene aktualisieren und Timer setzen
             $this->writeAttr('SceneLive', $this->captureCurrentScene());
+            IPS_LogMessage('RML', 'Rearm by MANUAL change (var '.$SenderID.') in '.$this->InstanceID.' at '.date('H:i:s'));
             $this->armAutoOffTimer();
             return;
         }
@@ -333,6 +336,7 @@ class RoomMotionLights extends IPSModule
                     $last = $this->getLastActorState();
                     $wasOn = (bool)($last[(string)$v] ?? false);
                     if ($on && !$wasOn && !$this->getGuard() && $this->getSettingManualAutoOff()) {
+                        IPS_LogMessage('RML', 'Rearm by MANUAL change (var '.$SenderID.') in '.$this->InstanceID.' at '.date('H:i:s'));
                         $this->armAutoOffTimer();
                     }
                     $last[(string)$v] = $on;
@@ -356,6 +360,7 @@ class RoomMotionLights extends IPSModule
                     $last = $this->getLastActorState();
                     $wasOn = (bool)($last[(string)$v] ?? false);
                     if ($on && !$wasOn && !$this->getGuard() && $this->getSettingManualAutoOff()) {
+                        IPS_LogMessage('RML', 'Rearm by MANUAL change (var '.$SenderID.') in '.$this->InstanceID.' at '.date('H:i:s'));
                         $this->armAutoOffTimer();
                     }
                     $last[(string)$v] = $on;
@@ -381,6 +386,7 @@ class RoomMotionLights extends IPSModule
                 $last = $this->getLastActorState();
                 $wasOn = (bool)($last[(string)$v] ?? false);
                 if ($on && !$wasOn && !$this->getGuard() && $this->getSettingManualAutoOff()) {
+                    IPS_LogMessage('RML', 'Rearm by MANUAL change (var '.$SenderID.') in '.$this->InstanceID.' at '.date('H:i:s'));
                     $this->armAutoOffTimer();
                 }
                 $last[(string)$v] = $on;
@@ -415,7 +421,8 @@ class RoomMotionLights extends IPSModule
             case 'Set_TimeoutSec':
                 $val = max(5, min(3600, (int)$Value));
                 SetValueInteger($this->GetIDForIdent('Set_TimeoutSec'), $val);
-                if ($this->GetTimerInterval('AutoOff') > 0) $this->armAutoOffTimer();
+                if ($this->GetTimerInterval('AutoOff') > 0) IPS_LogMessage('RML', 'Rearm by MANUAL change (var '.$SenderID.') in '.$this->InstanceID.' at '.date('H:i:s'));
+                $this->armAutoOffTimer();
                 break;
 
             case 'Set_DefaultDim':
@@ -512,6 +519,7 @@ class RoomMotionLights extends IPSModule
 
     private function armAutoOffTimer(): void
     {
+        IPS_LogMessage('RML', 'Rearm by MANUAL change (var '.$SenderID.') in '.$this->InstanceID.' at '.date('H:i:s'));
         $timeout = $this->getSettingTimeoutSec();
         $until = time() + $timeout;
 
