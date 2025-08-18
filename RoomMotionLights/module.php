@@ -60,10 +60,12 @@ class RoomMotionLights extends IPSModule
         $this->RegisterAttributeString('SceneRestore',  '[]');      // gespeicherte Szene
         $this->RegisterAttributeBoolean('GuardInternal', false);    // interne Setzungen ignorieren
     }
-public function DebugPing(): void
-{
-    $this->dbg('DebugPing: SendDebug/Log funktioniert.');
-}
+
+    public function DebugPing(): void
+    {
+        $this->dbg('DebugPing: SendDebug/Log funktioniert.');
+    }
+
     // ===== Öffentliche Komfort-Wrapper (RML_* werden generiert) =====
     public function SetTimeoutSec(int $seconds): void
     {
@@ -179,12 +181,12 @@ public function DebugPing(): void
                          'caption' => $this->Translate('Variable'), 'name' => 'var', 'width' => '320px',
                          'add' => 0, 'edit' => ['type' => 'SelectVariable']
                      ]], 'add' => true, 'delete' => true]
-                ]],
+                ]]],
                 ['type' => 'ExpansionPanel', 'caption' => $this->Translate('Lux (optional)'), 'items' => [
                     ['type' => 'SelectVariable', 'name' => 'LuxVar', 'caption' => $this->Translate('Lux-Variable')],
                     ['type' => 'NumberSpinner',  'name' => 'LuxMax', 'caption' => $this->Translate('Lux-Maximalwert'), 'minimum' => 0, 'maximum' => 100000],
                     ['type' => 'Label', 'caption' => $this->Translate('Lux max, Timeout, Default Dim & Auto-Off sind zusätzlich als Instanzvariablen steuerbar.')]
-                ]],
+                ]]],
                 // Einstellungen direkt im Modul-Dialog (Properties)
                 ['type' => 'ExpansionPanel', 'caption' => $this->Translate('Einstellungen'), 'items' => [
                     ['type' => 'NumberSpinner', 'name' => 'TimeoutSec',      'caption' => $this->Translate('Timeout (Sekunden)'), 'minimum' => 5, 'maximum' => 3600],
@@ -429,7 +431,7 @@ public function DebugPing(): void
     {
         $this->writeAttr('SceneRestore', []);
         $this->dbg('DebugClearScene: SceneRestore geleert');
-    }
+        }
     public function DebugRestoreScene(): void
     {
         $rest = $this->readAttr('SceneRestore', []);
@@ -736,9 +738,15 @@ public function DebugPing(): void
     /* ================= Debug helper ================= */
     private function dbg(string $msg): void
     {
-        // Alles im Instanz-Debug anzeigen:
-        $this->SendDebug('RML', $msg, 0);
-        // Optional zusätzlich ins System-Log:
-        IPS_LogMessage('RML', $msg);
+        // Channel mit Instanz-ID, Meldung inkl. aufrufender Funktion
+        $bt     = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2);
+        $caller = isset($bt[1]['function']) ? $bt[1]['function'] : 'unknown';
+        $chan   = 'RML#' . $this->InstanceID;
+
+        $text = $caller . ': ' . $msg;
+        // Instanz-Debug
+        $this->SendDebug($chan, $text, 0);
+        // Optional zusätzlich ins System-Log
+        IPS_LogMessage($chan, $text);
     }
 }
