@@ -16,45 +16,32 @@ class RoomMotionLights extends IPSModule
         $this->RegisterPropertyString ('GlobalInhibits', '[]');   // [{var:int}]
         $this->RegisterPropertyString ('Lights', '[]');           // [{type, var, switchVar, range}]
         $this->RegisterPropertyInteger('TimeoutSec', 60);
-        $this->RegisterPropertyInteger('TimeoutVar', 0);          // optional: Timer-Quelle aus Variable
         $this->RegisterPropertyInteger('DefaultDim', 60);
         $this->RegisterPropertyBoolean('ManualAutoOff', true);
         $this->RegisterPropertyInteger('LuxVar', 0);
         $this->RegisterPropertyInteger('LuxMax', 50);
+        $this->RegisterPropertyBoolean('RestoreOnNext', true);    // NEU: als Property im Modul-Dialog
 
         // ---- Laufzeit-Settings (für View/WebFront) ----
         $this->ensureProfiles();
+
         $this->RegisterVariableBoolean('Override', 'Automatik (Auto-ON) deaktivieren', '~Switch', 1);
+        $this->EnableAction('Override');
 
         $this->RegisterVariableInteger('Set_TimeoutSec',  'Timeout (s)', 'RML.TimeoutSec',  2);
-        $this->RegisterVariableInteger('Set_DefaultDim',  'Default Dim (%)', '~Intensity.100', 3);
-        $this->RegisterVariableInteger('Set_LuxMax',      'Lux max', 'RML.LuxMax', 4);
-        $this->RegisterVariableBoolean('Set_ManualAutoOff', 'Manuelles Auto-Off aktiv', '~Switch', 5);
-        $this->RegisterVariableBoolean('RestoreOnNext',   'Szene bei nächster Bewegung wiederherstellen', '~Switch', 6);
-
-        $this->EnableAction('Override');
         $this->EnableAction('Set_TimeoutSec');
-        $this->EnableAction('Set_DefaultDim');
-        $this->EnableAction('Set_LuxMax');
-        $this->EnableAction('Set_ManualAutoOff');
-        $this->EnableAction('RestoreOnNext');
 
-        // Erstwerte aus Properties übernehmen (nur falls 0/uninitialisiert)
-        if ($this->GetValue('Set_TimeoutSec') === 0) {
-            @SetValueInteger($this->GetIDForIdent('Set_TimeoutSec'), max(5, (int)$this->ReadPropertyInteger('TimeoutSec')));
-        }
-        if ($this->GetValue('Set_DefaultDim') === 0) {
-            @SetValueInteger($this->GetIDForIdent('Set_DefaultDim'), max(1, (int)$this->ReadPropertyInteger('DefaultDim')));
-        }
-        if ($this->GetValue('Set_LuxMax') === 0) {
-            @SetValueInteger($this->GetIDForIdent('Set_LuxMax'), max(0, (int)$this->ReadPropertyInteger('LuxMax')));
-        }
-        if (!IPS_VariableExists(@$this->GetIDForIdent('Set_ManualAutoOff')) || $this->GetValue('Set_ManualAutoOff') === false) {
-            @SetValueBoolean($this->GetIDForIdent('Set_ManualAutoOff'), (bool)$this->ReadPropertyBoolean('ManualAutoOff'));
-        }
-        if (!IPS_VariableExists(@$this->GetIDForIdent('RestoreOnNext'))) {
-            @SetValueBoolean($this->GetIDForIdent('RestoreOnNext'), true);
-        }
+        $this->RegisterVariableInteger('Set_DefaultDim',  'Default Dim (%)', '~Intensity.100', 3);
+        $this->EnableAction('Set_DefaultDim');
+
+        $this->RegisterVariableInteger('Set_LuxMax',      'Lux max', 'RML.LuxMax', 4);
+        $this->EnableAction('Set_LuxMax');
+
+        $this->RegisterVariableBoolean('Set_ManualAutoOff', 'Manuelles Auto-Off aktiv', '~Switch', 5);
+        $this->EnableAction('Set_ManualAutoOff');
+
+        $this->RegisterVariableBoolean('RestoreOnNext',   'Szene bei nächster Bewegung wiederherstellen', '~Switch', 6);
+        $this->EnableAction('RestoreOnNext');
 
         // ---- Timer ----
         $this->RegisterTimer('AutoOff', 0, 'RML_AutoOff($_IPS[\'TARGET\']);');
@@ -84,12 +71,23 @@ class RoomMotionLights extends IPSModule
     {
         $this->RequestAction('Set_ManualAutoOff', $on);
     }
+    public function SetRestoreOnNext(bool $on): void
+    {
+        $this->RequestAction('RestoreOnNext', $on);
+    }
 
     public function ApplyChanges()
     {
         parent::ApplyChanges();
 
         $this->ensureProfiles();
+
+        // --- Properties -> Runtime-Variablen spiegeln (Modul-Dialog -> Instanzvariablen) ---
+        @SetValueInteger($this->GetIDForIdent('Set_TimeoutSec'),   max(5, (int)$this->ReadPropertyInteger('TimeoutSec')));
+        @SetValueInteger($this->GetIDForIdent('Set_DefaultDim'),   max(1, min(100, (int)$this->ReadPropertyInteger('DefaultDim'))));
+        @SetValueInteger($this->GetIDForIdent('Set_LuxMax'),       max(0, (int)$this->ReadPropertyInteger('LuxMax')));
+        @SetValueBoolean($this->GetIDForIdent('Set_ManualAutoOff'), (bool)$this->ReadPropertyBoolean('ManualAutoOff'));
+        @SetValueBoolean($this->GetIDForIdent('RestoreOnNext'),     (bool)$this->ReadPropertyBoolean('RestoreOnNext'));
 
         // Vorherige Registrierungen lösen
         $prev = $this->getRegisteredIDs();
@@ -120,13 +118,6 @@ class RoomMotionLights extends IPSModule
             $sv = (int)($a['switchVar'] ?? 0);
             if ($v  > 0 && @IPS_VariableExists($v))  { $this->RegisterMessage($v,  self::VM_UPDATE); $new[] = $v; }
             if ($sv > 0 && @IPS_VariableExists($sv)) { $this->RegisterMessage($sv, self::VM_UPDATE); $new[] = $sv; }
-        }
-
-        // optional: TimeoutVar Änderungen beobachten? (nicht zwingend)
-        $tVar = (int)$this->ReadPropertyInteger('TimeoutVar');
-        if ($tVar > 0 && @IPS_VariableExists($tVar)) {
-            $this->RegisterMessage($tVar, self::VM_UPDATE);
-            $new[] = $tVar;
         }
 
         $this->setRegisteredIDs($new);
@@ -180,11 +171,15 @@ class RoomMotionLights extends IPSModule
                 ]],
                 ['type' => 'ExpansionPanel', 'caption' => 'Lux (optional)', 'items' => [
                     ['type' => 'SelectVariable', 'name' => 'LuxVar', 'caption' => 'Lux-Variable'],
-                    ['type' => 'NumberSpinner', 'name' => 'LuxMax', 'caption' => 'Lux-Maximalwert'],
+                    ['type' => 'NumberSpinner',  'name' => 'LuxMax', 'caption' => 'Lux-Maximalwert', 'minimum' => 0, 'maximum' => 100000],
                     ['type' => 'Label', 'caption' => 'Lux max, Timeout, Default Dim & Auto-Off sind zusätzlich als Instanzvariablen steuerbar.']
                 ]],
-                ['type' => 'ExpansionPanel', 'caption' => 'Timer (optional)', 'items' => [
-                    ['type' => 'SelectVariable', 'name' => 'TimeoutVar', 'caption' => 'Timeout-Variable (Sekunden)']
+                // NEU: Einstellungen direkt im Modul-Dialog
+                ['type' => 'ExpansionPanel', 'caption' => 'Einstellungen', 'items' => [
+                    ['type' => 'NumberSpinner', 'name' => 'TimeoutSec',   'caption' => 'Timeout (Sekunden)', 'minimum' => 5, 'maximum' => 3600],
+                    ['type' => 'NumberSpinner', 'name' => 'DefaultDim',   'caption' => 'Default Dim (%)',    'minimum' => 1, 'maximum' => 100],
+                    ['type' => 'CheckBox',      'name' => 'ManualAutoOff','caption' => 'Manuelles Auto-Off aktiv'],
+                    ['type' => 'CheckBox',      'name' => 'RestoreOnNext','caption' => 'Szene bei nächster Bewegung wiederherstellen (Startzustand)']
                 ]]
             ],
             'actions' => [
@@ -435,11 +430,6 @@ class RoomMotionLights extends IPSModule
     private function armAutoOffTimer(): void
     {
         $timeout = $this->getSettingTimeoutSec();
-        $tVar    = (int)$this->ReadPropertyInteger('TimeoutVar');
-        if ($tVar > 0 && @IPS_VariableExists($tVar)) {
-            $val = @GetValue($tVar);
-            if (is_numeric($val) && (int)$val > 0) $timeout = (int)$val;
-        }
         $this->SetTimerInterval('AutoOff', $timeout * 1000);
     }
 
