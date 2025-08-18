@@ -48,11 +48,11 @@ class RoomMotionLights extends IPSModule
         $this->RegisterTimer('AutoOff', 0, 'RML_AutoOff($_IPS[\'TARGET\']);');
 
         // Debug: Restzeit in Sekunden anzeigen
-$this->RegisterVariableInteger('CountdownSec', 'Auto-Off Restzeit (s)', 'RML.TimeoutSec', 7);
-// Sekundentick für die Anzeige (läuft nur, wenn Auto-Off aktiv ist)
-$this->RegisterTimer('CountdownTick', 0, 'RML_CountdownTick($_IPS[\'TARGET\']);');
-// Endzeitpunkt des aktuellen Auto-Off (Unix-Timestamp)
-$this->RegisterAttributeInteger('AutoOffUntil', 0);
+        $this->RegisterVariableInteger('CountdownSec', 'Auto-Off Restzeit (s)', 'RML.TimeoutSec', 7);
+        // Sekundentick für die Anzeige (läuft nur, wenn Auto-Off aktiv ist)
+        $this->RegisterTimer('CountdownTick', 0, 'RML_CountdownTick($_IPS[\'TARGET\']);');
+        // Endzeitpunkt des aktuellen Auto-Off (Unix-Timestamp)
+        $this->RegisterAttributeInteger('AutoOffUntil', 0);
 
         // ---- Attribute (intern) ----
         $this->RegisterAttributeString('RegisteredIDs', '[]');      // für MessageSink
@@ -60,6 +60,9 @@ $this->RegisterAttributeInteger('AutoOffUntil', 0);
         $this->RegisterAttributeString('SceneLive',     '[]');      // aktuelle Szene
         $this->RegisterAttributeString('SceneRestore',  '[]');      // gespeicherte Szene
         $this->RegisterAttributeBoolean('GuardInternal', false);    // interne Setzungen ignorieren
+
+        // NEU: Zustands-Merker für Flankenerkennung (OFF->ON)
+        $this->RegisterAttributeString('LastActorState', '{}');     // { varID(string): bool on/off }
     }
 
     // ===== Öffentliche Komfort-Wrapper (RML_* werden generiert) =====
@@ -130,6 +133,15 @@ $this->RegisterAttributeInteger('AutoOffUntil', 0);
         }
 
         $this->setRegisteredIDs($new);
+
+        // NEU: LastActorState initial mit IST-Zustand füllen (verhindert Fehl-Resets beim ersten Poll)
+        $init = [];
+        foreach ($this->getLights() as $a) {
+            $vid = (int)($a['var'] ?? 0);
+            if ($vid <= 0) continue;
+            $init[(string)$vid] = $this->isActorOn($a);
+        }
+        $this->setLastActorState($init);
     }
 
     /* ================= Formular ================= */
@@ -225,9 +237,9 @@ $this->RegisterAttributeInteger('AutoOffUntil', 0);
 
         $this->SetTimerInterval('AutoOff', 0);
         // Debug-Anzeige & Marker zurücksetzen
-$this->WriteAttributeInteger('AutoOffUntil', 0);
-$this->SetTimerInterval('CountdownTick', 0);
-@SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
+        $this->WriteAttributeInteger('AutoOffUntil', 0);
+        $this->SetTimerInterval('CountdownTick', 0);
+        @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
     }
 
     /* ================= MessageSink ================= */
@@ -304,33 +316,83 @@ $this->SetTimerInterval('CountdownTick', 0);
             return;
         }
 
-        // 2) Manuelle Lichtänderungen → Memory + SceneLive + optional Auto-Off
+        // 2) Manuelle Lichtänderungen → Memory + SceneLive + optional Auto-Off (mit Flankenerkennung)
         foreach ($this->getLights() as $a) {
             $v  = (int)($a['var'] ?? 0);
             $sv = (int)($a['switchVar'] ?? 0);
 
-            // Dimmer-/Switch-Änderung
+            // Dimmer-/Switch-Änderung an der Hauptvariable
             if ($SenderID === $v) {
                 $type = $a['type'] ?? '';
                 if ($type === 'switch') {
                     $on = (bool)@GetValueBoolean($v);
                     $this->updateMemorySwitch($a, $on);
                     $this->updateSceneLive();
-                    if ($on && $this->getSettingManualAutoOff()) $this->armAutoOffTimer();
+
+                    // Flankenerkennung OFF->ON
+                    $last = $this->getLastActorState();
+                    $wasOn = (bool)($last[(string)$v] ?? false);
+                    if ($on && !$wasOn && !$this->getGuard() && $this->getSettingManualAutoOff()) {
+                        $this->armAutoOffTimer();
+                    }
+                    $last[(string)$v] = $on;
+                    $this->setLastActorState($last);
+
+                    // Wenn ALLES AUS -> Timer stoppen
+                    if (!$on && !$this->anyLightOn()) {
+                        $this->SetTimerInterval('AutoOff', 0);
+                        $this->SetTimerInterval('CountdownTick', 0);
+                        $this->WriteAttributeInteger('AutoOffUntil', 0);
+                        @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
+                    }
                 } elseif ($type === 'dimmer') {
                     $pct = $this->getDimmerPct($a);
                     $on  = $pct > 0;
+
                     $this->updateMemoryDimmer($a, $pct, $on);
                     $this->updateSceneLive();
-                    if ($on && $this->getSettingManualAutoOff()) $this->armAutoOffTimer();
+
+                    // Flankenerkennung OFF->ON
+                    $last = $this->getLastActorState();
+                    $wasOn = (bool)($last[(string)$v] ?? false);
+                    if ($on && !$wasOn && !$this->getGuard() && $this->getSettingManualAutoOff()) {
+                        $this->armAutoOffTimer();
+                    }
+                    $last[(string)$v] = $on;
+                    $this->setLastActorState($last);
+
+                    // Wenn ALLES AUS -> Timer stoppen
+                    if (!$on && !$this->anyLightOn()) {
+                        $this->SetTimerInterval('AutoOff', 0);
+                        $this->SetTimerInterval('CountdownTick', 0);
+                        $this->WriteAttributeInteger('AutoOffUntil', 0);
+                        @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
+                    }
                 }
             }
-            // separate Ein/Aus-Variable
+
+            // separate Ein/Aus-Variable (falls vorhanden)
             if ($sv > 0 && $SenderID === $sv) {
                 $on = (bool)@GetValueBoolean($sv);
                 $this->updateMemorySwitch($a, $on);
                 $this->updateSceneLive();
-                if ($on && $this->getSettingManualAutoOff()) $this->armAutoOffTimer();
+
+                // Flankenerkennung OFF->ON (per Haupt-ID als Schlüssel)
+                $last = $this->getLastActorState();
+                $wasOn = (bool)($last[(string)$v] ?? false);
+                if ($on && !$wasOn && !$this->getGuard() && $this->getSettingManualAutoOff()) {
+                    $this->armAutoOffTimer();
+                }
+                $last[(string)$v] = $on;
+                $this->setLastActorState($last);
+
+                // Wenn ALLES AUS -> Timer stoppen
+                if (!$on && !$this->anyLightOn()) {
+                    $this->SetTimerInterval('AutoOff', 0);
+                    $this->SetTimerInterval('CountdownTick', 0);
+                    $this->WriteAttributeInteger('AutoOffUntil', 0);
+                    @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
+                }
             }
         }
     }
@@ -340,15 +402,15 @@ $this->SetTimerInterval('CountdownTick', 0);
     {
         switch ($Ident) {
             case 'Override':
-    SetValueBoolean($this->GetIDForIdent('Override'), (bool)$Value);
-    if ($Value) {
-        // laufenden Auto-Off abbrechen
-        $this->SetTimerInterval('AutoOff', 0);
-        $this->SetTimerInterval('CountdownTick', 0);
-        $this->WriteAttributeInteger('AutoOffUntil', 0);
-        @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
-    }
-    break;
+                SetValueBoolean($this->GetIDForIdent('Override'), (bool)$Value);
+                if ($Value) {
+                    // laufenden Auto-Off abbrechen
+                    $this->SetTimerInterval('AutoOff', 0);
+                    $this->SetTimerInterval('CountdownTick', 0);
+                    $this->WriteAttributeInteger('AutoOffUntil', 0);
+                    @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
+                }
+                break;
 
             case 'Set_TimeoutSec':
                 $val = max(5, min(3600, (int)$Value));
@@ -447,42 +509,44 @@ $this->SetTimerInterval('CountdownTick', 0);
             IPS_SetVariableProfileValues('RML.LuxMax', 0, 100000, 1);
         }
     }
-private function armAutoOffTimer(): void
-{
-    $timeout = $this->getSettingTimeoutSec();
-    $until = time() + $timeout;
 
-    $this->WriteAttributeInteger('AutoOffUntil', $until);
+    private function armAutoOffTimer(): void
+    {
+        $timeout = $this->getSettingTimeoutSec();
+        $until = time() + $timeout;
 
-    // Auto-Off (ms)
-    $this->SetTimerInterval('AutoOff', $timeout * 1000);
+        $this->WriteAttributeInteger('AutoOffUntil', $until);
 
-    // Sekundentick für visuelle Anzeige starten
-    $this->SetTimerInterval('CountdownTick', 1000);
+        // Auto-Off (ms)
+        $this->SetTimerInterval('AutoOff', $timeout * 1000);
 
-    // Sofort initiale Anzeige setzen
-    @SetValueInteger($this->GetIDForIdent('CountdownSec'), max(0, $until - time()));
-}
-public function CountdownTick(): void
-{
-    $until = (int)$this->ReadAttributeInteger('AutoOffUntil');
-    if ($until <= 0) {
-        // Keine laufende Auto-Off-Phase
-        $this->SetTimerInterval('CountdownTick', 0);
-        @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
-        return;
+        // Sekundentick für visuelle Anzeige starten
+        $this->SetTimerInterval('CountdownTick', 1000);
+
+        // Sofort initiale Anzeige setzen
+        @SetValueInteger($this->GetIDForIdent('CountdownSec'), max(0, $until - time()));
     }
 
-    $remain = $until - time();
-    if ($remain <= 0) {
-        // Countdown abgelaufen -> Anzeige auf 0 und Tick stoppen
-        @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
-        $this->SetTimerInterval('CountdownTick', 0);
-        return;
-    }
+    public function CountdownTick(): void
+    {
+        $until = (int)$this->ReadAttributeInteger('AutoOffUntil');
+        if ($until <= 0) {
+            // Keine laufende Auto-Off-Phase
+            $this->SetTimerInterval('CountdownTick', 0);
+            @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
+            return;
+        }
 
-    @SetValueInteger($this->GetIDForIdent('CountdownSec'), $remain);
-}
+        $remain = $until - time();
+        if ($remain <= 0) {
+            // Countdown abgelaufen -> Anzeige auf 0 und Tick stoppen
+            @SetValueInteger($this->GetIDForIdent('CountdownSec'), 0);
+            $this->SetTimerInterval('CountdownTick', 0);
+            return;
+        }
+
+        @SetValueInteger($this->GetIDForIdent('CountdownSec'), $remain);
+    }
 
     /* ================= Lists & Lights ================= */
     private function getVarListFromProperty(string $propName): array
@@ -669,5 +733,37 @@ public function CountdownTick(): void
     {
         $ids = array_values(array_unique(array_map('intval', $ids)));
         $this->WriteAttributeString('RegisteredIDs', json_encode($ids));
+    }
+
+    /* ================= NEU: Flanken-/Status-Helfer ================= */
+    private function getLastActorState(): array
+    {
+        $j = $this->ReadAttributeString('LastActorState');
+        $a = @json_decode($j, true);
+        return is_array($a) ? $a : [];
+    }
+    private function setLastActorState(array $m): void
+    {
+        $this->WriteAttributeString('LastActorState', json_encode($m));
+    }
+    private function isActorOn(array $actor): bool
+    {
+        $type = $actor['type'] ?? '';
+        if ($type === 'switch') {
+            $sv = (int)($actor['switchVar'] ?? 0);
+            if ($sv > 0 && @IPS_VariableExists($sv)) return (bool)@GetValueBoolean($sv);
+            return (bool)@GetValueBoolean((int)$actor['var']);
+        }
+        if ($type === 'dimmer') {
+            return $this->getDimmerPct($actor) > 0;
+        }
+        return false;
+    }
+    private function anyLightOn(): bool
+    {
+        foreach ($this->getLights() as $a) {
+            if ($this->isActorOn($a)) return true;
+        }
+        return false;
     }
 }
