@@ -1,11 +1,15 @@
 {
-  "id": "{6A9B6D40-4E2C-4C6F-9D3C-1B8EAA0E3F55}",
-  "name": "RoomMotionLights",
-  "type": 3,
-  "vendor": "murcel",
-  "aliases": ["Raum-Bewegungslicht", "RoomMotionLights"],
-  "parentRequirements": [],
-  "childRequirements": [],
-  "implemented": [],
-  "prefix": "RML"
+    "id": "{6A9B6D40-4E2C-4C6F-9D3C-1B8EAA0E3F55}",
+    "name": "RoomMotionLights",
+    "type": 3,
+    "vendor": "murcel",
+    "aliases": [
+        "Raum-Bewegungslicht",
+        "RoomMotionLights"
+    ],
+    "parentRequirements": [],
+    "childRequirements": [],
+    "implemented": [],
+    "prefix": "RML",
+    "url": ""
 }
